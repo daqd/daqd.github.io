@@ -1,0 +1,604 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hans">
+    
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="generator" content="Mengyu&#39;s Notes">
+    <title>使用GitHub+Hexo搭建博客系统 - Mengyu&#39;s Notes</title>
+    <meta name="author" content="Mengyu&#39;s Notes">
+    
+    
+        <link rel="icon" href="http://mife.io/assets/images/favicon.ico">
+    
+    
+    <script type="application/ld+json">{"@context":"http://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg"},"articleBody":"本着“生命不息，折腾不止”的精神，对之前的firekylin博客系统又进行了一次大换血，这次的搭建过程不会涉及过多的服务器相关命令，基本上都是一些git相关的命令。之所以选择进行大换血，是因为之前的博客系统对markdown语法支持不是太好，添加博文的时候经常出现一些莫名其妙的语法错误，致使无法添加进去。翻看一些同行的博客，还是决定将博客托管到github，还有一点，使用github的服务器，每个月还省了五十块的服务器的费用（一分钱也是爱呀）。\n关于GitHub Page使用github创建的博客是属于静态网站博客，也就是把写好的文章生成HTML网页，然后上传到github网站，显示的也就是HTML网页，所以加载速度会很快。\n大致步骤\n环境搭建\n安装配置Hexo\n配置主题\n配置github\n绑定域名\n创建和发布文章\n配置及美化\n\n环境搭建\n安装git （因为要给github上传文章）\n安装Node.js（因为Hexo是基于Node.js开发的）\n\n注：具体的安装步骤可自行百度，mac下的安装方法可参考之前搭建firelylin的文章\n安装和配置Hexonode安装完之后，打开终端，键入一下命令：\n1$ npm install -g hexo-cli\n创建一个目录，并切换到新创建的目录\n12$ mkdir hexo$ cd hexo\n初始化hexo\n1$ hexo init\n安装hexo所需的依赖包\n1$ npm install\n至此，hexo在 本地部署完成了，启动服务来看一下\n1$ hexo server\n在终端我们可看到启动服务的地址，复制到浏览器瞅一下\n输入http://0.0.0.0:4000\n配置主题在终端窗口下，定位到 Hexo 站点目录下。使用 Git checkout 代码：\n12$ cd your-hexo-site$ git clone https://github.com/iissnan/hexo-theme-next themes/next\n终端切换到hexo根目录，用你喜欢的编辑器打开配置文件 _config.yml\n找到里面的theme配置选项，将其参数值设置为：next\n1234# Extensions## Plugins: https://hexo.io/plugins/## Themes: https://hexo.io/themes/theme: next\n再次启动服务，查看是否生效了以上操作都正确的情况下，应该已经切换到next主题了，至此本地已经搭建完毕了。\n配置GitHub首先，在本地，你需要安装git工具，如果没有的话，如果你没有接触过git，推荐阅读阮一峰老师的git教程，很赞的哦。\n假设你的GIT工具已经搭建完，并已经注册好gitHub账号，打开浏览器我们切换到gitHub网站，手动创建一个github仓库，这里有要求：\n\n仓库名称是这样的格式：username.github.io\n\n注：username是你的github账号\n远程连接github需要配置SSH，如果，之前配置过，可跳过，没有的话，请自行百度。\n查看是否配置成功，需要键入以下命令：\n1ssh -T git@github.com\n若返回以下信息，说明配置成功\n\nHi daqd! You’ve successfully authenticated, but GitHub does not provide shell access.\n\nSSH配置好了，下面配置你的本地Hexo\n打开Hexo目录下的_config.yml，拉倒最下面配置为这样子,只需要把codertian改为你自己的github用户名就可以了。这种提交方式是使用http方式提交的，我个人测试的是不需要配置SSH也可以提交\n下面的配置大家要注意空格，复制我的更改即可，记住一定要是https，不能为http,不然会报错\n123456# Deployment## Docs: http://hexo.io/docs/deployment.htmldeploy:  type: git  repository: https://github.com/daqd/daqd.github.io.git  branch: master\n保存，cd到Hexo的根目录\n依次执行下面的命令\n123$ hexo clean$ hexo g$ hexo d\n第一次上传可能会让你输入git的用户名和密码\n如果成功的话在浏览器输入(http://daqd.github.io) 就可以访问你的博客了。把用户名换为你自己的。\n绑定域名github网站绑定域名首先，在github网站上，点击进去你创建的那个博客仓库点击create a new file here\n文件名称：CNAME\n文件内容：www.baidu.com\n注：实际上，是你的网站的域名！\n然后提交\n来到仓库的右边点击Download zip按钮，下载下来这个仓库，把里面的CNAME文件拖到Hexo文件的Source目录下\n这一步有点像一般在服务器端添加主机头。\n域名解析去你注册域名的网站，可能是新网，万网，易名中国等等，进入到域名管理-&gt;域名解析添加四条A记录，两条带www和两条不带www的记录，主机的IP填以下IP：\n12192.30.252.153192.30.252.154\n接下来，就是等待域名解析生效了，各个域名注册商的解析生效时间各有不同。\n创建和发布文章到这一步，说明你的博客已经搭建完了，通过域名解析并可直接访问，先恭喜一下！\n接下来，是一些使用上的步骤：\n如何添加一篇文章？后台入口在哪里？\n一般网站都会有一个后台，什么admin登陆进去可以XXX，hexo和github搭配，是通过本地创建一个markdown文件，编译成静态网页文件直接传到github，是没有后台的。\n那么怎样创建一篇博文？还是需要命令：\n1hexo new \"这里是博文的标题\"\n此时会在Source-&gt;_post目录下生成一个同名字的md文件，我们用编辑器打开它，mac端的推荐mou,你就可以依照markdown语法对它为所欲为了。\n写完之后，我们需要将它传到github，通过以下命令：\n1hexo d -g\n如果出现错误*** not found: git\n键入以下命令解决：\n1npm install hexo-deployer-git --save\n好啦，可以进入博客看看，应该已经上传进去了。\n配置及美化具体的一些配置，官方的文档写的很详细，附上传送门：官方文档\n","dateCreated":"2016-07-22T15:06:48+08:00","dateModified":"2018-06-11T17:42:59+08:00","datePublished":"2016-07-22T15:06:48+08:00","description":"本着“生命不息，折腾不止”的精神，对之前的firekylin博客系统又进行了一次大换血，这次的搭建过程不会涉及过多的服务器相关命令，基本上都是一些git相关的命令。之所以选择进行大换血，是因为之前的博客系统对markdown语法支持不是太好，添加博文的时候经常出现一些莫名其妙的语法错误，致使无法添加进去。翻看一些同行的博客，还是决定将博客托管到github，还有一点，使用github的服务器，每个月还省了五十块的服务器的费用（一分钱也是爱呀）。","headline":"使用GitHub+Hexo搭建博客系统","image":[],"mainEntityOfPage":{"@type":"WebPage","@id":"http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/"},"publisher":{"@type":"Organization","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg","logo":{"@type":"ImageObject","url":"pic.jpg"}},"url":"http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/","keywords":"github, hexo"}</script>
+    <meta name="description" content="本着“生命不息，折腾不止”的精神，对之前的firekylin博客系统又进行了一次大换血，这次的搭建过程不会涉及过多的服务器相关命令，基本上都是一些git相关的命令。之所以选择进行大换血，是因为之前的博客系统对markdown语法支持不是太好，添加博文的时候经常出现一些莫名其妙的语法错误，致使无法添加进去。翻看一些同行的博客，还是决定将博客托管到github，还有一点，使用github的服务器，每个">
+<meta name="keywords" content="github,hexo">
+<meta property="og:type" content="blog">
+<meta property="og:title" content="使用GitHub+Hexo搭建博客系统">
+<meta property="og:url" content="http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/index.html">
+<meta property="og:site_name" content="Mengyu&#39;s Notes">
+<meta property="og:description" content="本着“生命不息，折腾不止”的精神，对之前的firekylin博客系统又进行了一次大换血，这次的搭建过程不会涉及过多的服务器相关命令，基本上都是一些git相关的命令。之所以选择进行大换血，是因为之前的博客系统对markdown语法支持不是太好，添加博文的时候经常出现一些莫名其妙的语法错误，致使无法添加进去。翻看一些同行的博客，还是决定将博客托管到github，还有一点，使用github的服务器，每个">
+<meta property="og:locale" content="zh-Hans">
+<meta property="og:updated_time" content="2018-06-11T09:42:59.786Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="使用GitHub+Hexo搭建博客系统">
+<meta name="twitter:description" content="本着“生命不息，折腾不止”的精神，对之前的firekylin博客系统又进行了一次大换血，这次的搭建过程不会涉及过多的服务器相关命令，基本上都是一些git相关的命令。之所以选择进行大换血，是因为之前的博客系统对markdown语法支持不是太好，添加博文的时候经常出现一些莫名其妙的语法错误，致使无法添加进去。翻看一些同行的博客，还是决定将博客托管到github，还有一点，使用github的服务器，每个">
+    
+    
+        
+    
+    
+        <meta property="og:image" content="http://mife.io/assets/images/pic.jpg"/>
+    
+    
+    
+    
+    <!--STYLES-->
+    <link rel="stylesheet" href="/assets/css/style-1udptkpril81ozu8ifd8zpujn7ipu7lefxsiu5gxx0dpnzntdx6dusvki3ao.min.css">
+    <!--STYLES END-->
+    
+
+    
+    <script type="text/javascript">
+    var _hmt = _hmt || [];
+    (function() {
+      var hm = document.createElement("script");
+      hm.src = "//hm.baidu.com/hm.js?3689bb8a19409b583596dd91730d27d6";
+      var s = document.getElementsByTagName("script")[0];
+      s.parentNode.insertBefore(hm, s);
+    })();
+    </script>
+
+</head>
+
+    <body>
+        <div id="blog">
+            <!-- Define author's picture -->
+
+
+    
+        
+            
+        
+    
+
+<header id="header" data-behavior="5">
+    <i id="btn-open-sidebar" class="fa fa-lg fa-bars"></i>
+    <div class="header-title">
+        <a class="header-title-link" href="/ ">Mengyu&#39;s Notes</a>
+    </div>
+    
+        
+            <a  class="header-right-picture "
+                href="#about">
+        
+        
+            <img class="header-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+        
+        </a>
+    
+</header>
+
+            <!-- Define author's picture -->
+
+
+
+        
+    
+
+<nav id="sidebar" data-behavior="5">
+    <div class="sidebar-container">
+        
+            <div class="sidebar-profile">
+                <a href="/#about">
+                    <img class="sidebar-profile-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+                </a>
+                <h4 class="sidebar-profile-name">Mengyu&#39;s Notes</h4>
+                
+                    <h5 class="sidebar-profile-bio"><p>一身情怀，两手空空</p>
+</h5>
+                
+            </div>
+        
+        
+            <ul class="sidebar-buttons">
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/ "
+                            
+                            title="Home"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-home" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Home</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-archives"
+                            
+                            title="Archives"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-archive" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Archives</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-categories"
+                            
+                            title="Categories"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-bookmark" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Categories</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-tags"
+                            
+                            title="Tags"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-tags" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Tags</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="#about"
+                            
+                            title="About"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-user" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">About</span>
+                    </a>
+            </li>
+            
+        </ul>
+        
+            <ul class="sidebar-buttons">
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link " href="https://github.com/daqd" target="_blank" rel="noopener" title="GitHub">
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-github" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">GitHub</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link " href="mailto:hellojser@gmail.com" target="_blank" rel="noopener" title="Mail">
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-envelope-o" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Mail</span>
+                    </a>
+            </li>
+            
+        </ul>
+        
+    </div>
+</nav>
+
+            
+            <div id="main" data-behavior="5"
+                 class="
+                        hasCoverMetaIn
+                        ">
+                
+<article class="post">
+    
+    
+        <div class="post-header main-content-wrap text-left">
+    
+        <h1 class="post-title">
+            使用GitHub+Hexo搭建博客系统
+        </h1>
+    
+    
+        <div class="post-meta">
+    <time datetime="2016-07-22T15:06:48+08:00">
+	
+		    Jul 22, 2016
+    	
+    </time>
+    
+        <span>in </span>
+        
+    <a class="category-link" href="/categories/环境搭建/">环境搭建</a>
+
+
+    
+</div>
+
+    
+</div>
+
+    
+    <div class="post-content markdown">
+        <div class="main-content-wrap">
+            <p>本着“生命不息，折腾不止”的精神，对之前的firekylin博客系统又进行了一次大换血，这次的搭建过程不会涉及过多的服务器相关命令，基本上都是一些git相关的命令。之所以选择进行大换血，是因为之前的博客系统对markdown语法支持不是太好，添加博文的时候经常出现一些莫名其妙的语法错误，致使无法添加进去。翻看一些同行的博客，还是决定将博客托管到github，还有一点，使用github的服务器，每个月还省了五十块的服务器的费用（一分钱也是爱呀）。<br><a id="more"></a></p>
+<h2 id="关于GitHub-Page"><a href="#关于GitHub-Page" class="headerlink" title="关于GitHub Page"></a>关于GitHub Page</h2><p>使用github创建的博客是属于静态网站博客，也就是把写好的文章生成HTML网页，然后上传到github网站，显示的也就是HTML网页，所以加载速度会很快。</p>
+<h2 id="大致步骤"><a href="#大致步骤" class="headerlink" title="大致步骤"></a>大致步骤</h2><ul>
+<li>环境搭建</li>
+<li>安装配置Hexo</li>
+<li>配置主题</li>
+<li>配置github</li>
+<li>绑定域名</li>
+<li>创建和发布文章</li>
+<li>配置及美化</li>
+</ul>
+<h2 id="环境搭建"><a href="#环境搭建" class="headerlink" title="环境搭建"></a>环境搭建</h2><ul>
+<li>安装git （因为要给github上传文章）</li>
+<li>安装Node.js（因为Hexo是基于Node.js开发的）</li>
+</ul>
+<p>注：具体的安装步骤可自行百度，mac下的安装方法可参考之前搭建firelylin的文章</p>
+<h2 id="安装和配置Hexo"><a href="#安装和配置Hexo" class="headerlink" title="安装和配置Hexo"></a>安装和配置Hexo</h2><p><code>node</code>安装完之后，打开终端，键入一下命令：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">$</span><span class="bash"> npm install -g hexo-cli</span></span><br></pre></td></tr></table></figure>
+<p>创建一个目录，并切换到新创建的目录</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">$</span><span class="bash"> mkdir hexo</span></span><br><span class="line"><span class="meta">$</span><span class="bash"> <span class="built_in">cd</span> hexo</span></span><br></pre></td></tr></table></figure>
+<p>初始化hexo</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">$</span><span class="bash"> hexo init</span></span><br></pre></td></tr></table></figure>
+<p>安装hexo所需的依赖包</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">$</span><span class="bash"> npm install</span></span><br></pre></td></tr></table></figure>
+<p>至此，hexo在 本地部署完成了，启动服务来看一下</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">$</span><span class="bash"> hexo server</span></span><br></pre></td></tr></table></figure>
+<p>在终端我们可看到启动服务的地址，复制到浏览器瞅一下</p>
+<p>输入<a href="http://0.0.0.0:4000" target="_blank" rel="noopener">http://0.0.0.0:4000</a></p>
+<h2 id="配置主题"><a href="#配置主题" class="headerlink" title="配置主题"></a>配置主题</h2><p>在终端窗口下，定位到 Hexo 站点目录下。使用 Git checkout 代码：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">$</span><span class="bash"> <span class="built_in">cd</span> your-hexo-site</span></span><br><span class="line"><span class="meta">$</span><span class="bash"> git <span class="built_in">clone</span> https://github.com/iissnan/hexo-theme-next themes/next</span></span><br></pre></td></tr></table></figure>
+<p>终端切换到hexo根目录，用你喜欢的编辑器打开配置文件 <code>_config.yml</code></p>
+<p>找到里面的theme配置选项，将其参数值设置为：next</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">#</span><span class="bash"> Extensions</span></span><br><span class="line"><span class="meta">#</span><span class="bash"><span class="comment"># Plugins: https://hexo.io/plugins/</span></span></span><br><span class="line"><span class="meta">#</span><span class="bash"><span class="comment"># Themes: https://hexo.io/themes/</span></span></span><br><span class="line">theme: next</span><br></pre></td></tr></table></figure>
+<p>再次启动服务，查看是否生效了<br>以上操作都正确的情况下，应该已经切换到next主题了，至此本地已经搭建完毕了。</p>
+<h2 id="配置GitHub"><a href="#配置GitHub" class="headerlink" title="配置GitHub"></a>配置GitHub</h2><p>首先，在本地，你需要安装git工具，如果没有的话，如果你没有接触过git，推荐阅读阮一峰老师的git教程，很赞的哦。</p>
+<p>假设你的GIT工具已经搭建完，并已经注册好gitHub账号，打开浏览器我们切换到gitHub网站，手动创建一个github仓库，这里有要求：</p>
+<ul>
+<li>仓库名称是这样的格式：username.github.io</li>
+</ul>
+<p>注：username是你的github账号</p>
+<p>远程连接github需要配置SSH，如果，之前配置过，可跳过，没有的话，请自行百度。</p>
+<p>查看是否配置成功，需要键入以下命令：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">ssh</span> <span class="selector-tag">-T</span> <span class="selector-tag">git</span>@<span class="keyword">github</span>.<span class="keyword">com</span></span><br></pre></td></tr></table></figure>
+<p>若返回以下信息，说明配置成功</p>
+<blockquote>
+<p>Hi daqd! You’ve successfully authenticated, but GitHub does not provide shell access.</p>
+</blockquote>
+<p>SSH配置好了，下面配置你的本地Hexo</p>
+<p>打开Hexo目录下的_config.yml，拉倒最下面<br>配置为这样子,只需要把codertian改为你自己的github用户名就可以了。<br>这种提交方式是使用http方式提交的，我个人测试的是不需要配置SSH也可以提交</p>
+<p>下面的配置大家要注意空格，复制我的更改即可，记住一定要是https，不能为http,不然会报错</p>
+<figure class="highlight dts"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta"># Deployment</span></span><br><span class="line"><span class="meta">## Docs: http:<span class="comment">//hexo.io/docs/deployment.html</span></span></span><br><span class="line"><span class="symbol">deploy:</span></span><br><span class="line"><span class="symbol">  type:</span> git</span><br><span class="line"><span class="symbol">  repository:</span> https:<span class="comment">//github.com/daqd/daqd.github.io.git</span></span><br><span class="line"><span class="symbol">  branch:</span> master</span><br></pre></td></tr></table></figure>
+<p>保存，cd到Hexo的根目录</p>
+<p>依次执行下面的命令</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">$</span><span class="bash"> hexo clean</span></span><br><span class="line"><span class="meta">$</span><span class="bash"> hexo g</span></span><br><span class="line"><span class="meta">$</span><span class="bash"> hexo d</span></span><br></pre></td></tr></table></figure>
+<p>第一次上传可能会让你输入git的用户名和密码</p>
+<p>如果成功的话在浏览器输入(<a href="http://daqd.github.io" target="_blank" rel="noopener">http://daqd.github.io</a>) 就可以访问你的博客了。把用户名换为你自己的。</p>
+<h2 id="绑定域名"><a href="#绑定域名" class="headerlink" title="绑定域名"></a>绑定域名</h2><h3 id="github网站绑定域名"><a href="#github网站绑定域名" class="headerlink" title="github网站绑定域名"></a>github网站绑定域名</h3><p>首先，在github网站上，点击进去你创建的那个博客仓库点击<code>create a new file here</code></p>
+<p>文件名称：CNAME</p>
+<p>文件内容：<a href="http://www.baidu.com" target="_blank" rel="noopener">www.baidu.com</a></p>
+<p>注：实际上，是你的网站的域名！</p>
+<p>然后提交</p>
+<p>来到仓库的右边点击Download zip按钮，下载下来这个仓库，把里面的CNAME文件拖到Hexo文件的Source目录下</p>
+<p>这一步有点像一般在服务器端添加主机头。</p>
+<h3 id="域名解析"><a href="#域名解析" class="headerlink" title="域名解析"></a>域名解析</h3><p>去你注册域名的网站，可能是新网，万网，易名中国等等，进入到域名管理-&gt;域名解析<br>添加四条A记录，两条带www和两条不带www的记录，主机的IP填以下IP：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">192<span class="selector-class">.30</span><span class="selector-class">.252</span><span class="selector-class">.153</span></span><br><span class="line">192<span class="selector-class">.30</span><span class="selector-class">.252</span><span class="selector-class">.154</span></span><br></pre></td></tr></table></figure>
+<p>接下来，就是等待域名解析生效了，各个域名注册商的解析生效时间各有不同。</p>
+<h2 id="创建和发布文章"><a href="#创建和发布文章" class="headerlink" title="创建和发布文章"></a>创建和发布文章</h2><p>到这一步，说明你的博客已经搭建完了，通过域名解析并可直接访问，先恭喜一下！</p>
+<p>接下来，是一些使用上的步骤：</p>
+<p>如何添加一篇文章？后台入口在哪里？</p>
+<p>一般网站都会有一个后台，什么admin登陆进去可以XXX，hexo和github搭配，是通过本地创建一个markdown文件，编译成静态网页文件直接传到github，是没有后台的。</p>
+<p>那么怎样创建一篇博文？还是需要命令：</p>
+<figure class="highlight actionscript"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">hexo <span class="keyword">new</span> <span class="string">"这里是博文的标题"</span></span><br></pre></td></tr></table></figure>
+<p>此时会在<code>Source-&gt;_post</code>目录下生成一个同名字的md文件，我们用编辑器打开它，mac端的推荐mou,你就可以依照markdown语法对它为所欲为了。</p>
+<p>写完之后，我们需要将它传到github，通过以下命令：</p>
+<figure class="highlight ebnf"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="attribute">hexo d -g</span></span><br></pre></td></tr></table></figure>
+<p>如果出现错误<code>*** not found: git</code></p>
+<p>键入以下命令解决：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">npm <span class="keyword">install</span> hexo-deployer-git <span class="comment">--save</span></span><br></pre></td></tr></table></figure>
+<p>好啦，可以进入博客看看，应该已经上传进去了。</p>
+<h2 id="配置及美化"><a href="#配置及美化" class="headerlink" title="配置及美化"></a>配置及美化</h2><p>具体的一些配置，官方的文档写的很详细，附上传送门：<a href="http://theme-next.iissnan.com/getting-started.html" target="_blank" rel="noopener">官方文档</a></p>
+
+            
+
+        </div>
+    </div>
+    <div id="post-footer" class="post-footer main-content-wrap">
+        
+            <div class="post-footer-tags">
+                <span class="text-color-light text-small">TAGGED IN</span><br/>
+                
+    <a class="tag tag--primary tag--small t-link" href="/tags/github/">github</a> <a class="tag tag--primary tag--small t-link" href="/tags/hexo/">hexo</a>
+
+            </div>
+        
+        
+            <div class="post-actions-wrap">
+    <nav>
+        <ul class="post-actions post-action-nav">
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2016/12/02/聊一聊Javascript中的this/" data-tooltip="聊一聊Javascript中的this" aria-label="PREVIOUS: 聊一聊Javascript中的this">
+                
+                    <i class="fa fa-angle-left" aria-hidden="true"></i>
+                    <span class="hide-xs hide-sm text-small icon-ml">PREVIOUS</span>
+                </a>
+            </li>
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2016/06/27/几年大学的总结/" data-tooltip="几年大学的总结" aria-label="NEXT: 几年大学的总结">
+                
+                    <span class="hide-xs hide-sm text-small icon-mr">NEXT</span>
+                    <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+    <ul class="post-actions post-action-share">
+        <li class="post-action hide-lg hide-md hide-sm">
+            <a class="post-action-btn btn btn--default btn-open-shareoptions" href="#btn-open-shareoptions" aria-label="Share this post">
+                <i class="fa fa-share-alt" aria-hidden="true"></i>
+            </a>
+        </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/" title="Share on Weibo">
+                    <i class="fa fa-weibo" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/&amp;title=使用GitHub+Hexo搭建博客系统" title="Share on QQ">
+                    <i class="fa fa-qq" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/" title="Share on Qzone">
+                    <i class="fa fa-star" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+        
+            
+                <li class="post-action">
+                    <a class="post-action-btn btn btn--default" href="#disqus_thread">
+                        <i class="fa fa-comment-o"></i>
+                    </a>
+                </li>
+            
+        
+        <li class="post-action">
+            
+                <a class="post-action-btn btn btn--default" href="#" aria-label="Back to top">
+            
+                <i class="fa fa-list" aria-hidden="true"></i>
+            </a>
+        </li>
+    </ul>
+</div>
+
+
+        
+        
+            
+                <div id="disqus_thread">
+    <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+</div>
+            
+        
+    </div>
+</article>
+
+
+
+                <footer id="footer" class="main-content-wrap">
+    <span class="copyrights">
+        Copyrights &copy; 2018 Mengyu&#39;s Notes. All Rights Reserved.
+    </span>
+</footer>
+
+            </div>
+            
+                <div id="bottom-bar" class="post-bottom-bar" data-behavior="5">
+                    <div class="post-actions-wrap">
+    <nav>
+        <ul class="post-actions post-action-nav">
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2016/12/02/聊一聊Javascript中的this/" data-tooltip="聊一聊Javascript中的this" aria-label="PREVIOUS: 聊一聊Javascript中的this">
+                
+                    <i class="fa fa-angle-left" aria-hidden="true"></i>
+                    <span class="hide-xs hide-sm text-small icon-ml">PREVIOUS</span>
+                </a>
+            </li>
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2016/06/27/几年大学的总结/" data-tooltip="几年大学的总结" aria-label="NEXT: 几年大学的总结">
+                
+                    <span class="hide-xs hide-sm text-small icon-mr">NEXT</span>
+                    <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+    <ul class="post-actions post-action-share">
+        <li class="post-action hide-lg hide-md hide-sm">
+            <a class="post-action-btn btn btn--default btn-open-shareoptions" href="#btn-open-shareoptions" aria-label="Share this post">
+                <i class="fa fa-share-alt" aria-hidden="true"></i>
+            </a>
+        </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/" title="Share on Weibo">
+                    <i class="fa fa-weibo" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/&amp;title=使用GitHub+Hexo搭建博客系统" title="Share on QQ">
+                    <i class="fa fa-qq" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/" title="Share on Qzone">
+                    <i class="fa fa-star" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+        
+            
+                <li class="post-action">
+                    <a class="post-action-btn btn btn--default" href="#disqus_thread">
+                        <i class="fa fa-comment-o"></i>
+                    </a>
+                </li>
+            
+        
+        <li class="post-action">
+            
+                <a class="post-action-btn btn btn--default" href="#" aria-label="Back to top">
+            
+                <i class="fa fa-list" aria-hidden="true"></i>
+            </a>
+        </li>
+    </ul>
+</div>
+
+
+                </div>
+                <div id="share-options-bar" class="share-options-bar" data-behavior="5">
+    <i id="btn-close-shareoptions" class="fa fa-close"></i>
+    <ul class="share-options">
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/">
+                    <i class="fa fa-weibo" aria-hidden="true"></i><span>Share on Weibo</span>
+                </a>
+            </li>
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/&amp;title=使用GitHub+Hexo搭建博客系统">
+                    <i class="fa fa-qq" aria-hidden="true"></i><span>Share on QQ</span>
+                </a>
+            </li>
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/">
+                    <i class="fa fa-star" aria-hidden="true"></i><span>Share on Qzone</span>
+                </a>
+            </li>
+        
+    </ul>
+</div>
+
+            
+        </div>
+        
+
+
+    
+        
+    
+
+<div id="about">
+    <div id="about-card">
+        <div id="about-btn-close">
+            <i class="fa fa-remove"></i>
+        </div>
+        
+            <img id="about-card-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+        
+            <h4 id="about-card-name">Mengyu&#39;s Notes</h4>
+        
+            <div id="about-card-bio"><p>一身情怀，两手空空</p>
+</div>
+        
+        
+            <div id="about-card-job">
+                <i class="fa fa-briefcase"></i>
+                <br/>
+                <p>FE</p>
+
+            </div>
+        
+        
+            <div id="about-card-location">
+                <i class="fa fa-map-marker"></i>
+                <br/>
+                Beijing
+            </div>
+        
+    </div>
+</div>
+
+        
+        
+<div id="cover" style="background-image:url('/assets/images/cover-v1.2.0.jpg');"></div>
+        <!--SCRIPTS-->
+<script src="/assets/js/script-yhuo2grt8r7qkqumzgjoglkfbicl1thukjgmla6jopu56zpcowfedi5zjcor.min.js"></script>
+<!--SCRIPTS END-->
+
+    
+        <script>
+             var disqus_config = function () {
+                 this.page.url = 'http://mife.io/2016/07/22/使用GitHub-Hexo搭建博客系统/';
+                 
+                    this.page.identifier = '2016/07/22/使用GitHub-Hexo搭建博客系统/';
+                 
+             };
+            (function() {
+                var d = document, s = d.createElement('script');
+                var disqus_shortname = 'mife';
+                s.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+
+                s.setAttribute('data-timestamp', +new Date());
+                (d.head || d.body).appendChild(s);
+            })();
+        </script>
+    
+
+
+
+    </body>
+</html>

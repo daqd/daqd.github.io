@@ -1,0 +1,542 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hans">
+    
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="generator" content="Mengyu&#39;s Notes">
+    <title>HTML5的图片上传、预览与压缩功能的实现 - Mengyu&#39;s Notes</title>
+    <meta name="author" content="Mengyu&#39;s Notes">
+    
+    
+        <link rel="icon" href="http://mife.io/assets/images/favicon.ico">
+    
+    
+    <script type="application/ld+json">{"@context":"http://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg"},"articleBody":"近日，在某个项目上线了一个功能需求，在移动设备（H5端）实现图片上传预览并压缩，尤其是在当前各种移动设备盛行的年代，各大手机厂商为了推广手机可谓是下足了功夫，各种吹捧自己的手机多少多少万的相机，那么随之而来的，便是随手一拍，一张照片的大小轻轻松松上兆，于是乎，图片在上传到服务器之前压缩便成了必不可少的一步。\n第一次接到这个需求的时候，当然第一反应从内心来讲是拒绝的，毕竟H5的环境与原生开发的环境还是不同的，调用原生的能力相对较弱，H5想要调用原生能力还是需要浏览器的支持，即使某些个浏览器支持，也不能保证所有的浏览器都支持，这注定是一个麻烦的需求。\n但是，既然需求来了，那么兵来将挡，水来土掩，那就折腾折腾吧。\n实现思路在一番查阅资料与不断的实践摸索之后，确定了实现思路，如下：\n1、放置一个type为file的input调起手机相册和相机；2、通过createObjectURL或者FileReader读取input上传的文件，存入一个数组；3、预览图片可以直接通过img标签加载上一步读取的结果；4、遍历第二步存入的数组，构造多个image对象，同时创建多个canvas，将图片写入到canvas；5、点击某个预览图上的删除按钮，删除对应的第二步数组中的图片，并重复第四步重新生成，并绑定相关事件，如删除事件；6、点击提交通过canvas的toBlob或toDataURL将图片导出相关格式，目前这个导出的是blob格式（也就是二进制格式），追加到另一个数组；7、点击提交按钮，通过FormData构造一个对象，并将上一步的blob数组append进去；\n具体实现放置input如果UI类似于如下的模样，直接将input的透明度设置为0，在上面叠加一个层就可以了。\n读取文件并存入数组支持URL，便通过URL.createObjectURL读取，不支持则通过FileReader进行读取；最终将读取到的图片存储到Upload实例的imgList数组中。123456789101112131415161718192021222324252627282930313233/** *\t上传图片 */Upload.prototype.upload = function(t, e) &#123;\tvar files = e.target.files;\tif(window.URL) &#123;\t\tfor(var i = 0, len = files.length; i &lt; len; i++) &#123;\t\t\tconsole.log(t.imgList);\t\t\tt.imgList.push(window.URL.createObjectURL(files[i]));\t\t&#125;\t\t//如果获取到的长传图片数组为空，停止执行\t\tif(t.imgList &lt;= 0) &#123;\t\t\talert(\"未获取到上传的图片,请重新上传！\");\t\t&#125; else &#123;\t\t\tt.createIMG();\t\t&#125;\t&#125; else if(window.FileReader) &#123;\t\t//opera不支持createObjectURL/revokeObjectURL方法。用FileReader对象来处理\t\tfor(var i = 0, len = files.length; i &lt; len; i++) &#123;\t\t\tvar reader = new FileReader();\t\t\treader.readAsDataURL(files[i]);\t\t\treader.onload = function(e) &#123;\t\t\t\tt.imgList.push(this.result);\t\t\t\t//如果获取到的长传图片数组为空，停止执行\t\t\t\tif(t.imgList &lt;= 0) &#123;\t\t\t\t\talert(\"未获取到上传的图片,请重新上传！\");\t\t\t\t&#125; else &#123;\t\t\t\t\tt.createIMG();\t\t\t\t&#125;\t\t\t&#125;\t\t&#125;\t&#125;&#125;\n生成预览图遍历实例上的imgList数组，生成预览图片和最终导出用到的canvas，目前，这里每张上传的图片用了两个canvas：一个canvas用来显示预览图，这个canvas相对较小；另一个canvas用来导出二进制的图片，相对较大，隐藏在第一个canvas的后边；\n注：创建完预览图之后需要重新绑定下事件1234567891011121314151617/** *\t根据上传图片生成预览图 */Upload.prototype.createIMG = function() &#123;\t$(this.conf.wrap).empty();\t// console.log(this.imgList);\tvar self = this;\tfor(var i = 0, len = this.imgList.length; i &lt; len; i++) &#123;\t\t(function(m) &#123;\t\t\tvar imgItemWrap = self.createCanvas(self.imgList[m]);\t\t\t$(self.conf.wrap).append(imgItemWrap);\t\t&#125;)(i)\t&#125;\t//绑定删除图片\tthis.rmIMG();&#125;\n写入图片到canvas:123456789101112131415161718192021222324252627282930313233343536373839404142/** * 转换图片到canvas */Upload.prototype.createCanvas = function(uri) &#123;\tvar\t\tcanvas = document.createElement('canvas'),\t\tbigImgCanvas = document.createElement('canvas'),\t\timgItemWrap = document.createElement('div'),\t\tremoveDiv = document.createElement('div'),\t\timgItem = new Image(),\t\tcontext = canvas.getContext('2d'),\t\tbigContext = bigImgCanvas.getContext('2d');\tcanvas.width = 80;\tcanvas.height = 80;\tcanvas.className = 'uploadImg';\tbigImgCanvas.className = 'outputImg';\timgItemWrap.className = 'uploadItem';\tremoveDiv.className = 'removeWrap';\tremoveDiv.innerHTML = 'X';\tbigImgCanvas.style.display = \"none\";\t//计算该图片的缩放比例\timgItem.onload = function() &#123;\t\t//每张图片需要保存的canvas\t\tbigImgCanvas.width = imgItem.naturalWidth;\t\tbigImgCanvas.height = imgItem.naturalHeight;\t\tvar dpr = 80 / imgItem.naturalWidth;\t\t//\t\tconsole.log(dpr);\t\tconsole.log(imgItem.width);\t\tcontext.drawImage(imgItem, 0, 0, 80, imgItem.naturalHeight * dpr);\t\tbigContext.drawImage(imgItem, 0, 0, imgItem.naturalWidth, imgItem.naturalHeight);\t&#125;;\timgItem.src = uri;\t$(imgItemWrap).append(canvas);\t$(imgItemWrap).append(bigImgCanvas);\t$(imgItemWrap).append(removeDiv);\treturn imgItemWrap;&#125;\n至此，图片上传加预览的工作已经完成了，在每张预览图的后面都有一个隐藏的Canvas，用于导出大图，因为预览图的canvas直接导出来的图片会很模糊，所以，不得已需要重新用一个大的canvas来导出图片。\n导出图片上面，已经把需要用于导出的canvas绘制到了页面上，遍历所有的隐藏的canvas，通过canvas的toDataURL或toBlob，将canvas导出即可。\ntoDataURL 接收两个参数，第一个参数为导出类型，默认值为：image/png，第二个参数为导出质量，取值为0~1。toBlob 接收三个参数，第一个参数为回调函数，因为导出二进制blob文件为异步操作，所以需要在第回调函数内获取导出的二进制文件流。第二个参数和第三个参数对应上面toDataURL的两个参数。123456789101112131415161718/** *\t压缩图片 * **/Upload.prototype.post = function() &#123;\tif($('.outputImg').length &lt;= 0) return;\tthis.blobData = [];\tvar self = this;\tfor(var i = 0; i &lt; $('.outputImg').length; i++) &#123;\t\t(function(m) &#123;\t\t\t\t\t\tvar compressedImageBlob = self.dataURL2Blob($('.outputImg')[m].toDataURL(\"image/jpeg\",0.1));\t\t\tself.blobData.push(compressedImageBlob);\t\t\tconsole.log(compressedImageBlob) // 压缩图像文件的大小 \t\t\tconsole.log(URL.createObjectURL(compressedImageBlob));\t//图片\t\t\tconsole.log(self) // 源文件的大小\t\t&#125;)(i)\t&#125;&#125;\n将dataURL转换成二进制blob对象：123456789101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657Upload.prototype.newBlob = function(data, datatype) &#123;\tvar out\ttry &#123;\t\tout = new Blob([data], &#123;\t\t\ttype: datatype\t\t&#125;)\t&#125; catch(e) &#123;\t\twindow.BlobBuilder = window.BlobBuilder ||\t\t\twindow.WebKitBlobBuilder ||\t\t\twindow.MozBlobBuilder ||\t\t\twindow.MSBlobBuilder\t\tif(e.name == 'TypeError' &amp;&amp; window.BlobBuilder) &#123;\t\t\tvar bb = new BlobBuilder()\t\t\tbb.append(data)\t\t\tout = bb.getBlob(datatype)\t\t&#125; else if(e.name == 'InvalidStateError') &#123;\t\t\tout = new Blob([data], &#123;\t\t\t\ttype: datatype\t\t\t&#125;)\t\t&#125; else &#123;\t\t\tthrow new Error('Your browser does not support Blob &amp; BlobBuilder!')\t\t&#125;\t&#125;\treturn out&#125;// data URIs to BlobUpload.prototype.dataURL2Blob = function(dataURI) &#123;//\tconsole.log(dataURI)\tvar byteStr\tvar intArray\tvar ab\tvar i\tvar mimetype\tvar parts\tparts = dataURI.split(',')\tparts[1] = parts[1].replace(/\\s/g, '')\tif(~parts[0].indexOf('base64')) &#123;\t\tbyteStr = atob(parts[1])\t&#125; else &#123;\t\tbyteStr = decodeURIComponent(parts[1])\t&#125;\tab = new ArrayBuffer(byteStr.length)\tintArray = new Uint8Array(ab)\tfor(i = 0; i &lt; byteStr.length; i++) &#123;\t\tintArray[i] = byteStr.charCodeAt(i)\t&#125;\tmimetype = parts[0].split(':')[1].split(';')[0]\treturn new this.newBlob(ab, mimetype)&#125;\n提交blob给服务器通过formData构造一个实例，将上面的图片append进去。\n12345678910111213141516171819202122/** *\t提交图片到接口 **/Upload.prototype.xhr = function() &#123;\tif(this.blobData.length &lt;= 0) return;\tvar fd = new FormData();\tfd.append('imgList', this.blobData);\tconsole.log(this.blobData);\t$.ajax(&#123;\t\t\"url\": \"http://192.168.1.111:8090/upload\",\t\tmethod: \"post\",\t\tcontentType: false,\t\tprocessData: false,\t\tdata: fd,\t\tsuccess: function(result) &#123;\t\t\tconsole.log(result);\t\t&#125;,\t\terror(xhr, status, error) &#123;\t\t\tconsole.log(error);\t\t&#125;\t&#125;)&#125;\n待优化至此，整个功能便实现了，还有几个待优化的点，因为上线时间的关系没有做处理：\n\n导出二进制文件的canvas没有必要每个图片生成多个，可以减少开销，只放一个，通过遍历存放图片的数组，每次生成完一个可以再写入下一个。\n目前所有的图片都转换成了jpg的格式，可以在第一次拿到上传的图片的时候，将图片的类型存起来，在从canvas导出的时候按照原格式导出。\n同上，还有图片的名称。\n因为找不到一个api专门用来控制转换成图片的大小界定值，只能通过图片质量的设置来控制图片的大小，但是可以获取到二进制的大小，所以，如果服务器有大小限制，比如说200K，或许可以递归去再次写入压缩后超出200K的图片，再次导出，直到图片到达200k以内。\n\n（完）\n","dateCreated":"2018-01-14T00:17:09+08:00","dateModified":"2018-06-11T17:42:59+08:00","datePublished":"2018-01-14T00:17:09+08:00","description":"近日，在某个项目上线了一个功能需求，在移动设备（H5端）实现图片上传预览并压缩，尤其是在当前各种移动设备盛行的年代，各大手机厂商为了推广手机可谓是下足了功夫，各种吹捧自己的手机多少多少万的相机，那么随之而来的，便是随手一拍，一张照片的大小轻轻松松上兆，于是乎，图片在上传到服务器之前压缩便成了必不可少的一步。\n第一次接到这个需求的时候，当然第一反应从内心来讲是拒绝的，毕竟H5的环境与原生开发的环境还是不同的，调用原生的能力相对较弱，H5想要调用原生能力还是需要浏览器的支持，即使某些个浏览器支持，也不能保证所有的浏览器都支持，这注定是一个麻烦的需求。\n但是，既然需求来了，那么兵来将挡，水来土掩，那就折腾折腾吧。","headline":"HTML5的图片上传、预览与压缩功能的实现","image":[],"mainEntityOfPage":{"@type":"WebPage","@id":"http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/"},"publisher":{"@type":"Organization","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg","logo":{"@type":"ImageObject","url":"pic.jpg"}},"url":"http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/","keywords":"HTML5, 图片上传"}</script>
+    <meta name="description" content="近日，在某个项目上线了一个功能需求，在移动设备（H5端）实现图片上传预览并压缩，尤其是在当前各种移动设备盛行的年代，各大手机厂商为了推广手机可谓是下足了功夫，各种吹捧自己的手机多少多少万的相机，那么随之而来的，便是随手一拍，一张照片的大小轻轻松松上兆，于是乎，图片在上传到服务器之前压缩便成了必不可少的一步。 第一次接到这个需求的时候，当然第一反应从内心来讲是拒绝的，毕竟H5的环境与原生开发的环境还">
+<meta name="keywords" content="HTML5,图片上传">
+<meta property="og:type" content="blog">
+<meta property="og:title" content="HTML5的图片上传、预览与压缩功能的实现">
+<meta property="og:url" content="http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/index.html">
+<meta property="og:site_name" content="Mengyu&#39;s Notes">
+<meta property="og:description" content="近日，在某个项目上线了一个功能需求，在移动设备（H5端）实现图片上传预览并压缩，尤其是在当前各种移动设备盛行的年代，各大手机厂商为了推广手机可谓是下足了功夫，各种吹捧自己的手机多少多少万的相机，那么随之而来的，便是随手一拍，一张照片的大小轻轻松松上兆，于是乎，图片在上传到服务器之前压缩便成了必不可少的一步。 第一次接到这个需求的时候，当然第一反应从内心来讲是拒绝的，毕竟H5的环境与原生开发的环境还">
+<meta property="og:locale" content="zh-Hans">
+<meta property="og:image" content="http://mife.io/images/2018/1/addIcon.png">
+<meta property="og:updated_time" content="2018-06-11T09:42:59.785Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="HTML5的图片上传、预览与压缩功能的实现">
+<meta name="twitter:description" content="近日，在某个项目上线了一个功能需求，在移动设备（H5端）实现图片上传预览并压缩，尤其是在当前各种移动设备盛行的年代，各大手机厂商为了推广手机可谓是下足了功夫，各种吹捧自己的手机多少多少万的相机，那么随之而来的，便是随手一拍，一张照片的大小轻轻松松上兆，于是乎，图片在上传到服务器之前压缩便成了必不可少的一步。 第一次接到这个需求的时候，当然第一反应从内心来讲是拒绝的，毕竟H5的环境与原生开发的环境还">
+<meta name="twitter:image" content="http://mife.io/images/2018/1/addIcon.png">
+    
+    
+        
+    
+    
+        <meta property="og:image" content="http://mife.io/assets/images/pic.jpg"/>
+    
+    
+    
+    
+    <!--STYLES-->
+    <link rel="stylesheet" href="/assets/css/style-1udptkpril81ozu8ifd8zpujn7ipu7lefxsiu5gxx0dpnzntdx6dusvki3ao.min.css">
+    <!--STYLES END-->
+    
+
+    
+    <script type="text/javascript">
+    var _hmt = _hmt || [];
+    (function() {
+      var hm = document.createElement("script");
+      hm.src = "//hm.baidu.com/hm.js?3689bb8a19409b583596dd91730d27d6";
+      var s = document.getElementsByTagName("script")[0];
+      s.parentNode.insertBefore(hm, s);
+    })();
+    </script>
+
+</head>
+
+    <body>
+        <div id="blog">
+            <!-- Define author's picture -->
+
+
+    
+        
+            
+        
+    
+
+<header id="header" data-behavior="5">
+    <i id="btn-open-sidebar" class="fa fa-lg fa-bars"></i>
+    <div class="header-title">
+        <a class="header-title-link" href="/ ">Mengyu&#39;s Notes</a>
+    </div>
+    
+        
+            <a  class="header-right-picture "
+                href="#about">
+        
+        
+            <img class="header-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+        
+        </a>
+    
+</header>
+
+            <!-- Define author's picture -->
+
+
+
+        
+    
+
+<nav id="sidebar" data-behavior="5">
+    <div class="sidebar-container">
+        
+            <div class="sidebar-profile">
+                <a href="/#about">
+                    <img class="sidebar-profile-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+                </a>
+                <h4 class="sidebar-profile-name">Mengyu&#39;s Notes</h4>
+                
+                    <h5 class="sidebar-profile-bio"><p>一身情怀，两手空空</p>
+</h5>
+                
+            </div>
+        
+        
+            <ul class="sidebar-buttons">
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/ "
+                            
+                            title="Home"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-home" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Home</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-archives"
+                            
+                            title="Archives"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-archive" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Archives</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-categories"
+                            
+                            title="Categories"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-bookmark" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Categories</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-tags"
+                            
+                            title="Tags"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-tags" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Tags</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="#about"
+                            
+                            title="About"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-user" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">About</span>
+                    </a>
+            </li>
+            
+        </ul>
+        
+            <ul class="sidebar-buttons">
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link " href="https://github.com/daqd" target="_blank" rel="noopener" title="GitHub">
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-github" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">GitHub</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link " href="mailto:hellojser@gmail.com" target="_blank" rel="noopener" title="Mail">
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-envelope-o" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Mail</span>
+                    </a>
+            </li>
+            
+        </ul>
+        
+    </div>
+</nav>
+
+            
+            <div id="main" data-behavior="5"
+                 class="
+                        hasCoverMetaIn
+                        ">
+                
+<article class="post">
+    
+    
+        <div class="post-header main-content-wrap text-left">
+    
+        <h1 class="post-title">
+            HTML5的图片上传、预览与压缩功能的实现
+        </h1>
+    
+    
+        <div class="post-meta">
+    <time datetime="2018-01-14T00:17:09+08:00">
+	
+		    Jan 14, 2018
+    	
+    </time>
+    
+</div>
+
+    
+</div>
+
+    
+    <div class="post-content markdown">
+        <div class="main-content-wrap">
+            <p>近日，在某个项目上线了一个功能需求，在移动设备（H5端）实现图片上传预览并压缩，尤其是在当前各种移动设备盛行的年代，各大手机厂商为了推广手机可谓是下足了功夫，各种吹捧自己的手机多少多少万的相机，那么随之而来的，便是随手一拍，一张照片的大小轻轻松松上兆，于是乎，图片在上传到服务器之前压缩便成了必不可少的一步。</p>
+<p>第一次接到这个需求的时候，当然第一反应从内心来讲是拒绝的，毕竟H5的环境与原生开发的环境还是不同的，调用原生的能力相对较弱，H5想要调用原生能力还是需要浏览器的支持，即使某些个浏览器支持，也不能保证所有的浏览器都支持，这注定是一个麻烦的需求。</p>
+<p>但是，既然需求来了，那么兵来将挡，水来土掩，那就折腾折腾吧。<br><a id="more"></a></p>
+<h2 id="实现思路"><a href="#实现思路" class="headerlink" title="实现思路"></a>实现思路</h2><p>在一番查阅资料与不断的实践摸索之后，确定了实现思路，如下：</p>
+<p>1、放置一个type为file的input调起手机相册和相机；<br>2、通过createObjectURL或者FileReader读取input上传的文件，存入一个数组；<br>3、预览图片可以直接通过img标签加载上一步读取的结果；<br>4、遍历第二步存入的数组，构造多个image对象，同时创建多个canvas，将图片写入到canvas；<br>5、点击某个预览图上的删除按钮，删除对应的第二步数组中的图片，并重复第四步重新生成，并绑定相关事件，如删除事件；<br>6、点击提交通过canvas的toBlob或toDataURL将图片导出相关格式，目前这个导出的是blob格式（也就是二进制格式），追加到另一个数组；<br>7、点击提交按钮，通过FormData构造一个对象，并将上一步的blob数组append进去；</p>
+<h2 id="具体实现"><a href="#具体实现" class="headerlink" title="具体实现"></a>具体实现</h2><h3 id="放置input"><a href="#放置input" class="headerlink" title="放置input"></a>放置input</h3><p>如果UI类似于如下的模样，直接将input的透明度设置为0，在上面叠加一个层就可以了。<br><img src="/images/2018/1/addIcon.png" alt="jsBridge"></p>
+<h3 id="读取文件并存入数组"><a href="#读取文件并存入数组" class="headerlink" title="读取文件并存入数组"></a>读取文件并存入数组</h3><p>支持URL，便通过URL.createObjectURL读取，不支持则通过FileReader进行读取；<br>最终将读取到的图片存储到Upload实例的imgList数组中。<br><figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> *	上传图片</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line">Upload.prototype.upload = <span class="function"><span class="keyword">function</span>(<span class="params">t, e</span>) </span>&#123;</span><br><span class="line">	<span class="keyword">var</span> files = e.target.files;</span><br><span class="line">	<span class="keyword">if</span>(<span class="built_in">window</span>.URL) &#123;</span><br><span class="line">		<span class="keyword">for</span>(<span class="keyword">var</span> i = <span class="number">0</span>, len = files.length; i &lt; len; i++) &#123;</span><br><span class="line">			<span class="built_in">console</span>.log(t.imgList);</span><br><span class="line">			t.imgList.push(<span class="built_in">window</span>.URL.createObjectURL(files[i]));</span><br><span class="line">		&#125;</span><br><span class="line">		<span class="comment">//如果获取到的长传图片数组为空，停止执行</span></span><br><span class="line">		<span class="keyword">if</span>(t.imgList &lt;= <span class="number">0</span>) &#123;</span><br><span class="line">			alert(<span class="string">"未获取到上传的图片,请重新上传！"</span>);</span><br><span class="line">		&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">			t.createIMG();</span><br><span class="line">		&#125;</span><br><span class="line">	&#125; <span class="keyword">else</span> <span class="keyword">if</span>(<span class="built_in">window</span>.FileReader) &#123;</span><br><span class="line">		<span class="comment">//opera不支持createObjectURL/revokeObjectURL方法。用FileReader对象来处理</span></span><br><span class="line">		<span class="keyword">for</span>(<span class="keyword">var</span> i = <span class="number">0</span>, len = files.length; i &lt; len; i++) &#123;</span><br><span class="line">			<span class="keyword">var</span> reader = <span class="keyword">new</span> FileReader();</span><br><span class="line">			reader.readAsDataURL(files[i]);</span><br><span class="line">			reader.onload = <span class="function"><span class="keyword">function</span>(<span class="params">e</span>) </span>&#123;</span><br><span class="line">				t.imgList.push(<span class="keyword">this</span>.result);</span><br><span class="line">				<span class="comment">//如果获取到的长传图片数组为空，停止执行</span></span><br><span class="line">				<span class="keyword">if</span>(t.imgList &lt;= <span class="number">0</span>) &#123;</span><br><span class="line">					alert(<span class="string">"未获取到上传的图片,请重新上传！"</span>);</span><br><span class="line">				&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">					t.createIMG();</span><br><span class="line">				&#125;</span><br><span class="line">			&#125;</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<h3 id="生成预览图"><a href="#生成预览图" class="headerlink" title="生成预览图"></a>生成预览图</h3><p>遍历实例上的imgList数组，生成预览图片和最终导出用到的canvas，目前，这里每张上传的图片用了两个canvas：<br>一个canvas用来显示预览图，这个canvas相对较小；<br>另一个canvas用来导出二进制的图片，相对较大，隐藏在第一个canvas的后边；</p>
+<p>注：创建完预览图之后需要重新绑定下事件<br><figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> *	根据上传图片生成预览图</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line">Upload.prototype.createIMG = <span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">	$(<span class="keyword">this</span>.conf.wrap).empty();</span><br><span class="line">	<span class="comment">// console.log(this.imgList);</span></span><br><span class="line">	<span class="keyword">var</span> self = <span class="keyword">this</span>;</span><br><span class="line">	<span class="keyword">for</span>(<span class="keyword">var</span> i = <span class="number">0</span>, len = <span class="keyword">this</span>.imgList.length; i &lt; len; i++) &#123;</span><br><span class="line">		(<span class="function"><span class="keyword">function</span>(<span class="params">m</span>) </span>&#123;</span><br><span class="line">			<span class="keyword">var</span> imgItemWrap = self.createCanvas(self.imgList[m]);</span><br><span class="line">			$(self.conf.wrap).append(imgItemWrap);</span><br><span class="line">		&#125;)(i)</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">//绑定删除图片</span></span><br><span class="line">	<span class="keyword">this</span>.rmIMG();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>写入图片到canvas:<br><figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * 转换图片到canvas</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line">Upload.prototype.createCanvas = <span class="function"><span class="keyword">function</span>(<span class="params">uri</span>) </span>&#123;</span><br><span class="line">	<span class="keyword">var</span></span><br><span class="line">		canvas = <span class="built_in">document</span>.createElement(<span class="string">'canvas'</span>),</span><br><span class="line">		bigImgCanvas = <span class="built_in">document</span>.createElement(<span class="string">'canvas'</span>),</span><br><span class="line">		imgItemWrap = <span class="built_in">document</span>.createElement(<span class="string">'div'</span>),</span><br><span class="line">		removeDiv = <span class="built_in">document</span>.createElement(<span class="string">'div'</span>),</span><br><span class="line">		imgItem = <span class="keyword">new</span> Image(),</span><br><span class="line">		context = canvas.getContext(<span class="string">'2d'</span>),</span><br><span class="line">		bigContext = bigImgCanvas.getContext(<span class="string">'2d'</span>);</span><br><span class="line"></span><br><span class="line">	canvas.width = <span class="number">80</span>;</span><br><span class="line">	canvas.height = <span class="number">80</span>;</span><br><span class="line">	canvas.className = <span class="string">'uploadImg'</span>;</span><br><span class="line">	bigImgCanvas.className = <span class="string">'outputImg'</span>;</span><br><span class="line">	imgItemWrap.className = <span class="string">'uploadItem'</span>;</span><br><span class="line">	removeDiv.className = <span class="string">'removeWrap'</span>;</span><br><span class="line">	removeDiv.innerHTML = <span class="string">'X'</span>;</span><br><span class="line"></span><br><span class="line">	bigImgCanvas.style.display = <span class="string">"none"</span>;</span><br><span class="line">	<span class="comment">//计算该图片的缩放比例</span></span><br><span class="line"></span><br><span class="line">	imgItem.onload = <span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">		<span class="comment">//每张图片需要保存的canvas</span></span><br><span class="line">		bigImgCanvas.width = imgItem.naturalWidth;</span><br><span class="line">		bigImgCanvas.height = imgItem.naturalHeight;</span><br><span class="line">		<span class="keyword">var</span> dpr = <span class="number">80</span> / imgItem.naturalWidth;</span><br><span class="line">		<span class="comment">//		console.log(dpr);</span></span><br><span class="line">		<span class="built_in">console</span>.log(imgItem.width);</span><br><span class="line">		context.drawImage(imgItem, <span class="number">0</span>, <span class="number">0</span>, <span class="number">80</span>, imgItem.naturalHeight * dpr);</span><br><span class="line">		bigContext.drawImage(imgItem, <span class="number">0</span>, <span class="number">0</span>, imgItem.naturalWidth, imgItem.naturalHeight);</span><br><span class="line">	&#125;;</span><br><span class="line"></span><br><span class="line">	imgItem.src = uri;</span><br><span class="line">	$(imgItemWrap).append(canvas);</span><br><span class="line">	$(imgItemWrap).append(bigImgCanvas);</span><br><span class="line">	$(imgItemWrap).append(removeDiv);</span><br><span class="line">	<span class="keyword">return</span> imgItemWrap;</span><br><span class="line"></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>至此，图片上传加预览的工作已经完成了，在每张预览图的后面都有一个隐藏的Canvas，用于导出大图，因为预览图的canvas直接导出来的图片会很模糊，所以，不得已需要重新用一个大的canvas来导出图片。</p>
+<h2 id="导出图片"><a href="#导出图片" class="headerlink" title="导出图片"></a>导出图片</h2><p>上面，已经把需要用于导出的canvas绘制到了页面上，遍历所有的隐藏的canvas，通过canvas的toDataURL或toBlob，将canvas导出即可。</p>
+<p>toDataURL 接收两个参数，第一个参数为导出类型，默认值为：image/png，第二个参数为导出质量，取值为0~1。<br>toBlob 接收三个参数，第一个参数为回调函数，因为导出二进制blob文件为异步操作，所以需要在第回调函数内获取导出的二进制文件流。第二个参数和第三个参数对应上面toDataURL的两个参数。<br><figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> *	压缩图片</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> **/</span></span><br><span class="line">Upload.prototype.post = <span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">	<span class="keyword">if</span>($(<span class="string">'.outputImg'</span>).length &lt;= <span class="number">0</span>) <span class="keyword">return</span>;</span><br><span class="line">	<span class="keyword">this</span>.blobData = [];</span><br><span class="line">	<span class="keyword">var</span> self = <span class="keyword">this</span>;</span><br><span class="line">	<span class="keyword">for</span>(<span class="keyword">var</span> i = <span class="number">0</span>; i &lt; $(<span class="string">'.outputImg'</span>).length; i++) &#123;</span><br><span class="line">		(<span class="function"><span class="keyword">function</span>(<span class="params">m</span>) </span>&#123;			</span><br><span class="line">			<span class="keyword">var</span> compressedImageBlob = self.dataURL2Blob($(<span class="string">'.outputImg'</span>)[m].toDataURL(<span class="string">"image/jpeg"</span>,<span class="number">0.1</span>));</span><br><span class="line">			self.blobData.push(compressedImageBlob);</span><br><span class="line">			<span class="built_in">console</span>.log(compressedImageBlob) <span class="comment">// 压缩图像文件的大小 </span></span><br><span class="line">			<span class="built_in">console</span>.log(URL.createObjectURL(compressedImageBlob));	<span class="comment">//图片</span></span><br><span class="line">			<span class="built_in">console</span>.log(self) <span class="comment">// 源文件的大小</span></span><br><span class="line">		&#125;)(i)</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>将dataURL转换成二进制blob对象：<br><figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br></pre></td><td class="code"><pre><span class="line">Upload.prototype.newBlob = <span class="function"><span class="keyword">function</span>(<span class="params">data, datatype</span>) </span>&#123;</span><br><span class="line">	<span class="keyword">var</span> out</span><br><span class="line">	<span class="keyword">try</span> &#123;</span><br><span class="line">		out = <span class="keyword">new</span> Blob([data], &#123;</span><br><span class="line">			type: datatype</span><br><span class="line">		&#125;)</span><br><span class="line">	&#125; <span class="keyword">catch</span>(e) &#123;</span><br><span class="line">		<span class="built_in">window</span>.BlobBuilder = <span class="built_in">window</span>.BlobBuilder ||</span><br><span class="line">			<span class="built_in">window</span>.WebKitBlobBuilder ||</span><br><span class="line">			<span class="built_in">window</span>.MozBlobBuilder ||</span><br><span class="line">			<span class="built_in">window</span>.MSBlobBuilder</span><br><span class="line"></span><br><span class="line">		<span class="keyword">if</span>(e.name == <span class="string">'TypeError'</span> &amp;&amp; <span class="built_in">window</span>.BlobBuilder) &#123;</span><br><span class="line">			<span class="keyword">var</span> bb = <span class="keyword">new</span> BlobBuilder()</span><br><span class="line">			bb.append(data)</span><br><span class="line">			out = bb.getBlob(datatype)</span><br><span class="line">		&#125; <span class="keyword">else</span> <span class="keyword">if</span>(e.name == <span class="string">'InvalidStateError'</span>) &#123;</span><br><span class="line">			out = <span class="keyword">new</span> Blob([data], &#123;</span><br><span class="line">				type: datatype</span><br><span class="line">			&#125;)</span><br><span class="line">		&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">			<span class="keyword">throw</span> <span class="keyword">new</span> <span class="built_in">Error</span>(<span class="string">'Your browser does not support Blob &amp; BlobBuilder!'</span>)</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> out</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// data URIs to Blob</span></span><br><span class="line">Upload.prototype.dataURL2Blob = <span class="function"><span class="keyword">function</span>(<span class="params">dataURI</span>) </span>&#123;</span><br><span class="line"><span class="comment">//	console.log(dataURI)</span></span><br><span class="line">	<span class="keyword">var</span> byteStr</span><br><span class="line">	<span class="keyword">var</span> intArray</span><br><span class="line">	<span class="keyword">var</span> ab</span><br><span class="line">	<span class="keyword">var</span> i</span><br><span class="line">	<span class="keyword">var</span> mimetype</span><br><span class="line">	<span class="keyword">var</span> parts</span><br><span class="line"></span><br><span class="line">	parts = dataURI.split(<span class="string">','</span>)</span><br><span class="line">	parts[<span class="number">1</span>] = parts[<span class="number">1</span>].replace(<span class="regexp">/\s/g</span>, <span class="string">''</span>)</span><br><span class="line"></span><br><span class="line">	<span class="keyword">if</span>(~parts[<span class="number">0</span>].indexOf(<span class="string">'base64'</span>)) &#123;</span><br><span class="line">		byteStr = atob(parts[<span class="number">1</span>])</span><br><span class="line">	&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">		byteStr = <span class="built_in">decodeURIComponent</span>(parts[<span class="number">1</span>])</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	ab = <span class="keyword">new</span> <span class="built_in">ArrayBuffer</span>(byteStr.length)</span><br><span class="line">	intArray = <span class="keyword">new</span> <span class="built_in">Uint8Array</span>(ab)</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span>(i = <span class="number">0</span>; i &lt; byteStr.length; i++) &#123;</span><br><span class="line">		intArray[i] = byteStr.charCodeAt(i)</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	mimetype = parts[<span class="number">0</span>].split(<span class="string">':'</span>)[<span class="number">1</span>].split(<span class="string">';'</span>)[<span class="number">0</span>]</span><br><span class="line"></span><br><span class="line">	<span class="keyword">return</span> <span class="keyword">new</span> <span class="keyword">this</span>.newBlob(ab, mimetype)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<h3 id="提交blob给服务器"><a href="#提交blob给服务器" class="headerlink" title="提交blob给服务器"></a>提交blob给服务器</h3><p>通过formData构造一个实例，将上面的图片append进去。</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> *	提交图片到接口</span></span><br><span class="line"><span class="comment"> **/</span></span><br><span class="line">Upload.prototype.xhr = <span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">	<span class="keyword">if</span>(<span class="keyword">this</span>.blobData.length &lt;= <span class="number">0</span>) <span class="keyword">return</span>;</span><br><span class="line">	<span class="keyword">var</span> fd = <span class="keyword">new</span> FormData();</span><br><span class="line">	fd.append(<span class="string">'imgList'</span>, <span class="keyword">this</span>.blobData);</span><br><span class="line">	<span class="built_in">console</span>.log(<span class="keyword">this</span>.blobData);</span><br><span class="line">	$.ajax(&#123;</span><br><span class="line">		<span class="string">"url"</span>: <span class="string">"http://192.168.1.111:8090/upload"</span>,</span><br><span class="line">		method: <span class="string">"post"</span>,</span><br><span class="line">		contentType: <span class="literal">false</span>,</span><br><span class="line">		processData: <span class="literal">false</span>,</span><br><span class="line">		data: fd,</span><br><span class="line">		success: <span class="function"><span class="keyword">function</span>(<span class="params">result</span>) </span>&#123;</span><br><span class="line">			<span class="built_in">console</span>.log(result);</span><br><span class="line">		&#125;,</span><br><span class="line">		error(xhr, status, error) &#123;</span><br><span class="line">			<span class="built_in">console</span>.log(error);</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h2 id="待优化"><a href="#待优化" class="headerlink" title="待优化"></a>待优化</h2><p>至此，整个功能便实现了，还有几个待优化的点，因为上线时间的关系没有做处理：</p>
+<ul>
+<li>导出二进制文件的canvas没有必要每个图片生成多个，可以减少开销，只放一个，通过遍历存放图片的数组，每次生成完一个可以再写入下一个。</li>
+<li>目前所有的图片都转换成了jpg的格式，可以在第一次拿到上传的图片的时候，将图片的类型存起来，在从canvas导出的时候按照原格式导出。</li>
+<li>同上，还有图片的名称。</li>
+<li>因为找不到一个api专门用来控制转换成图片的大小界定值，只能通过图片质量的设置来控制图片的大小，但是可以获取到二进制的大小，所以，如果服务器有大小限制，比如说200K，或许可以递归去再次写入压缩后超出200K的图片，再次导出，直到图片到达200k以内。</li>
+</ul>
+<p>（完）</p>
+
+            
+
+        </div>
+    </div>
+    <div id="post-footer" class="post-footer main-content-wrap">
+        
+            <div class="post-footer-tags">
+                <span class="text-color-light text-small">TAGGED IN</span><br/>
+                
+    <a class="tag tag--primary tag--small t-link" href="/tags/HTML5/">HTML5</a> <a class="tag tag--primary tag--small t-link" href="/tags/图片上传/">图片上传</a>
+
+            </div>
+        
+        
+            <div class="post-actions-wrap">
+    <nav>
+        <ul class="post-actions post-action-nav">
+            <li class="post-action">
+                
+                    <a class="post-action-btn btn btn--disabled">
+                
+                    <i class="fa fa-angle-left" aria-hidden="true"></i>
+                    <span class="hide-xs hide-sm text-small icon-ml">PREVIOUS</span>
+                </a>
+            </li>
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/" data-tooltip="Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信" aria-label="NEXT: Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信">
+                
+                    <span class="hide-xs hide-sm text-small icon-mr">NEXT</span>
+                    <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+    <ul class="post-actions post-action-share">
+        <li class="post-action hide-lg hide-md hide-sm">
+            <a class="post-action-btn btn btn--default btn-open-shareoptions" href="#btn-open-shareoptions" aria-label="Share this post">
+                <i class="fa fa-share-alt" aria-hidden="true"></i>
+            </a>
+        </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/" title="Share on Weibo">
+                    <i class="fa fa-weibo" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/&amp;title=HTML5的图片上传、预览与压缩功能的实现" title="Share on QQ">
+                    <i class="fa fa-qq" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/" title="Share on Qzone">
+                    <i class="fa fa-star" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+        
+            
+                <li class="post-action">
+                    <a class="post-action-btn btn btn--default" href="#disqus_thread">
+                        <i class="fa fa-comment-o"></i>
+                    </a>
+                </li>
+            
+        
+        <li class="post-action">
+            
+                <a class="post-action-btn btn btn--default" href="#" aria-label="Back to top">
+            
+                <i class="fa fa-list" aria-hidden="true"></i>
+            </a>
+        </li>
+    </ul>
+</div>
+
+
+        
+        
+            
+                <div id="disqus_thread">
+    <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+</div>
+            
+        
+    </div>
+</article>
+
+
+
+                <footer id="footer" class="main-content-wrap">
+    <span class="copyrights">
+        Copyrights &copy; 2018 Mengyu&#39;s Notes. All Rights Reserved.
+    </span>
+</footer>
+
+            </div>
+            
+                <div id="bottom-bar" class="post-bottom-bar" data-behavior="5">
+                    <div class="post-actions-wrap">
+    <nav>
+        <ul class="post-actions post-action-nav">
+            <li class="post-action">
+                
+                    <a class="post-action-btn btn btn--disabled">
+                
+                    <i class="fa fa-angle-left" aria-hidden="true"></i>
+                    <span class="hide-xs hide-sm text-small icon-ml">PREVIOUS</span>
+                </a>
+            </li>
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/" data-tooltip="Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信" aria-label="NEXT: Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信">
+                
+                    <span class="hide-xs hide-sm text-small icon-mr">NEXT</span>
+                    <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+    <ul class="post-actions post-action-share">
+        <li class="post-action hide-lg hide-md hide-sm">
+            <a class="post-action-btn btn btn--default btn-open-shareoptions" href="#btn-open-shareoptions" aria-label="Share this post">
+                <i class="fa fa-share-alt" aria-hidden="true"></i>
+            </a>
+        </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/" title="Share on Weibo">
+                    <i class="fa fa-weibo" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/&amp;title=HTML5的图片上传、预览与压缩功能的实现" title="Share on QQ">
+                    <i class="fa fa-qq" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/" title="Share on Qzone">
+                    <i class="fa fa-star" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+        
+            
+                <li class="post-action">
+                    <a class="post-action-btn btn btn--default" href="#disqus_thread">
+                        <i class="fa fa-comment-o"></i>
+                    </a>
+                </li>
+            
+        
+        <li class="post-action">
+            
+                <a class="post-action-btn btn btn--default" href="#" aria-label="Back to top">
+            
+                <i class="fa fa-list" aria-hidden="true"></i>
+            </a>
+        </li>
+    </ul>
+</div>
+
+
+                </div>
+                <div id="share-options-bar" class="share-options-bar" data-behavior="5">
+    <i id="btn-close-shareoptions" class="fa fa-close"></i>
+    <ul class="share-options">
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/">
+                    <i class="fa fa-weibo" aria-hidden="true"></i><span>Share on Weibo</span>
+                </a>
+            </li>
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/&amp;title=HTML5的图片上传、预览与压缩功能的实现">
+                    <i class="fa fa-qq" aria-hidden="true"></i><span>Share on QQ</span>
+                </a>
+            </li>
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/">
+                    <i class="fa fa-star" aria-hidden="true"></i><span>Share on Qzone</span>
+                </a>
+            </li>
+        
+    </ul>
+</div>
+
+            
+        </div>
+        
+
+
+    
+        
+    
+
+<div id="about">
+    <div id="about-card">
+        <div id="about-btn-close">
+            <i class="fa fa-remove"></i>
+        </div>
+        
+            <img id="about-card-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+        
+            <h4 id="about-card-name">Mengyu&#39;s Notes</h4>
+        
+            <div id="about-card-bio"><p>一身情怀，两手空空</p>
+</div>
+        
+        
+            <div id="about-card-job">
+                <i class="fa fa-briefcase"></i>
+                <br/>
+                <p>FE</p>
+
+            </div>
+        
+        
+            <div id="about-card-location">
+                <i class="fa fa-map-marker"></i>
+                <br/>
+                Beijing
+            </div>
+        
+    </div>
+</div>
+
+        
+        
+<div id="cover" style="background-image:url('/assets/images/cover-v1.2.0.jpg');"></div>
+        <!--SCRIPTS-->
+<script src="/assets/js/script-yhuo2grt8r7qkqumzgjoglkfbicl1thukjgmla6jopu56zpcowfedi5zjcor.min.js"></script>
+<!--SCRIPTS END-->
+
+    
+        <script>
+             var disqus_config = function () {
+                 this.page.url = 'http://mife.io/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/';
+                 
+                    this.page.identifier = '2018/01/14/HTML5的图片上传、预览与压缩功能的实现/';
+                 
+             };
+            (function() {
+                var d = document, s = d.createElement('script');
+                var disqus_shortname = 'mife';
+                s.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+
+                s.setAttribute('data-timestamp', +new Date());
+                (d.head || d.body).appendChild(s);
+            })();
+        </script>
+    
+
+
+
+    </body>
+</html>

@@ -1,0 +1,602 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hans">
+    
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="generator" content="Mengyu&#39;s Notes">
+    <title>Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信 - Mengyu&#39;s Notes</title>
+    <meta name="author" content="Mengyu&#39;s Notes">
+    
+    
+        <link rel="icon" href="http://mife.io/assets/images/favicon.ico">
+    
+    
+    <script type="application/ld+json">{"@context":"http://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg"},"articleBody":"需求背景如果在一个移动端的项目里，百分之八十以上都是嵌入的H5，原生基本上只在是一个壳，并且在H5的业务流程中，也穿插着与Native的通信，不是简简单单的嵌入H5就足够了，这时候，就需要一个极其可靠的H5与Native的通信机制来保证H5和Native的数据交换。其次，如果H5不再是一个多页应用或者传统上的MVC架构，采用的是基于vue、react或者ng开发的单页应用，这时候，就需要保证在H5的任何地方（如组件的各个生命周期、路由等）都可能需要与原生通信。\n那么，这篇文章就是用来总结刚刚在项目里遇到的这个问题，Hybird混合开发模式下嵌入H5单页应用，如何保证Native和H5进行可靠的数据交换和通信？\n\nWebview与H5的通信机制网上Webview与H5的通信机制的文章也很多，JSbridge只是其中一种通信机制，也是较为可靠的通信机制，其它通信方式受限于android和IOS的系统版本（因为需要了解原生的开发才能测试，暂未亲自考证过哦，只是通过网络了解的），通过根据网络上的整理（以后有机会亲测过后再来补充，先来占个位），大致分为以下几种：\n\n安卓通过loadUrl方法，IOS通过stringByEvaluatingJavaScriptFromString方法可调用window下的全局函数。\n\nwebview下可通过onJSAlert、onJSConfirm、onJsPrompt、shouldOverrideUrlLoading监听到JS的alert、confirm、prompt、location方法。\n\nJSbridge,由JS搭建的用于与Native通信的桥梁。\n\n\nJSBridge通信原理\nJSBridge是一种通信理念，Native端的Webview可以拦截H5端的所有请求，比如普通的http请求:http://xx.com?type=getToken，H5也可以自定义协议，需要与Native约定，比如：appName://getMessage?type=getToken，所以，H5端需要和Native约定一个通信数据结构，H5按照这种这种数据结构通过Schema url的形式发出，Native捕获并按照之前双方的约定对数据结构进行解析，再通过调用H5暴露在全局的方法将数据回传给H5，就完成了基础的H5与Native的数据通信。\nUrl Scheme前面说到，Native可以捕获到所有H5的请求，那么H5该以什么样的形式发出请求呢？\n\nwindow.href=”appName://getMessage?type=getToken”\n\niframe.src=”appName://getMessage?type=getToken”\n\n\n以上两种形式都可以在前端页面发出请求，第一种为页面跳转，第二种为在页面内加入iframe框架，在单页应用中，不可能每次都要跳页，单页应用这种架构除了首屏加载慢的弊端，也尽量避讳跳页，因为这种情况下，如果部分视图开启了keep-live,或者如果有些数据状态存在了vuex，redux等这种第三方状态管理中，会导致状态数据和页面状态丢失，这显然不是所期望出现的状况。所以，第二种才是比较好的发送Schema的方式。\n代码实现：\n1234567891011121314151617export default class JSBridge&#123;\tconstructor()&#123;&#125;\t//...other Methods\tcreateIframe(uri)&#123;\t\tthis.messagingIframe = document.createElement('iframe');        this.messagingIframe.style.display = 'none';        this.messagingIframe.src = this.CUSTOM_PROTOCOL_SCHEME + '://' + this.API_Name;        //采用iframe跳转scheme的方法        this.messagingIframe.src = uri;        document.documentElement.appendChild(this.messagingIframe);        let that = this;        setTimeout(function() &#123;            that.messagingIframe.remove();        &#125;, 100);\t&#125;&#125;\nH5发送Schema url细化JSBridge通信原理一小节中的H5发送Schema的流程，H5端在发送消息只需要以下这种形式发送即可。123456//需要回调处理返回的数据JSBridge.send('native监听的方法名字',&#123;\t//这里是发送给Native的数据\t&#125;,(responseData)=&gt;&#123;\t\t//H5接收到Native回传的数据的回调方法&#125;)\n或1234//不需要回调处理返回的数据JSBridge.send('native监听的方法名字',&#123;\t//这里是发送给Native的数据\t&#125;)\n从上面可以接受到两个或者三个参数，分别是Native监听的方法名、传给Native的数据、Native传回数据后H5端需要执行的回调方法，在send方法内需要做以下处理逻辑：\n\n根据参数argumens个数，判断是否需要回调处理，需要回调，则生成一个随机数作为key值，回调方法作为value存入本地一个callbackMethods对象中，并将随机数作为callbackId的值存入传给Native的数据对象中。\n\n根据UA判断当前环境是IOS还是安卓：\n\nIOS则将handleName，callbackId和data存入本地一个对象中，H5提供一个方法_fetchQueue获取。\n\n安卓，则将handleName,callbackId和data拼成Url，付给iframe的src。\n\n\n\n调用Iframe，发出请求消息。\n\n\n关键代码实现：\n12345678910111213141516171819202122232425262728 _doSend(message, responseCallback) &#123;     if(responseCallback) &#123;         //取到一个唯一的callbackid         let callbackId = this.getCallbackId();         //回调函数添加到集合中         this.responseCallbacks[callbackId] = responseCallback;         //方法的详情添加回调函数的关键标识         message['callbackId'] = callbackId;     &#125;     let uri;     //android中,可以通过onJsPrompt或者截取Url访问都行     let ua = navigator.userAgent;     if(ua.match(/(iPhone\\sOS)\\s([\\d_]+)/)||ua.match(/(iPad).*OS\\s([\\d_]+)/)) &#123;         //ios中,通过截取客户端url访问         //因为ios可以不暴露scheme,而是由原生手动获取         //正在调用的方法详情添加进入消息队列中,原生会主动获取         console.log(message);         window[this.JSBridgeName].sendMessageQueue.push(message);         // window[this.JSBridgeName].sendMessageQueue = message;         uri = this.getUri();     &#125;else&#123;         //android中兼容处理,将所有的参数一起拼接到url中         uri = this.getUri(message);     &#125;     //获取 触发方法的url scheme     //进行url scheme传值的iframethis.createIframe(uri); &#125;\nIOS获取数据消息IOS可调用该方法获取到H5发出的消息队列。123456789101112/** * iOS专用 * @description 当本地调用了callHandler之后,实际是调用了通用的scheme,通知原生 * 然后原生通过调用这个方法来获知当前正在调用的方法队列 */_fetchQueue() &#123;    // let messageQueueString = JSON.stringify(window.JSBridgeFor9AIR.sendMessageQueue);    let message =  window.JSBridgeFor9AIR.sendMessageQueue;    window.JSBridgeFor9AIR.sendMessageQueue = [];    // window.JSBridgeFor9AIR.sendMessageQueue = &#123;&#125;;            return message;&#125;\nNative调用H5/回传数据给H5到这里，H5已经按照固定的数据格式通过Schema将数据传给了Native，Native拿到这些数据会将callbackId取出来，并将值付给key为responseId的对象，该对象内还有一个字段为responseData，里面存放的是Native回传给H5的数据，Native如何将组装好的数据传给H5呢？\nNative可以主动调用Window全局下的JS方法，所以，在H5端准备一个全局可访问到的JS方法(_handleMessageFromNative)，该方法有一个参数，参数便就是Native组装的数据，这样就可以回传数据给H5，该方法内对数据应该做以下处理逻辑：\n\n取出responseId,去callbackMethods对象取出响应的回调方法\n将responseData作为该回调方法的参数传入，回调方法执行响应的处理逻辑。\n再次发送一个不需要回调方法的Schema,通知客户端已接收到数据。\n\n至此，一次由H5发出消息-&gt;Native接收消息并回复-&gt;H5接收到回复消息通知Native接收成功的通信完成了闭环。\n是不是该贴代码了？？ 再等等，还有一个问题\n从开始到现在，所有的通信都是先由H5发出，由Native接收到并处理完之后回传给H5，当然，并不可能所有的场景都必须要H5先发出，Native也需要在一定的场景下主动调用H5的方法。\n不管是Native回复H5的数据，还是，Native主动调用H5，都是通过Native调用H5暴露在Window下的全局方法，H5端已经暴露出了_handleMessageFromNative方法供Native回复数据，之后只需要在这个方法内部添加逻辑，然后区分是Native回复数据还是主动调用H5的逻辑即可。\n所以，该方法的处理逻辑现在变成了这样：\n\n含有responseId，说明是由H5端发出的通信请求，Native处理完之后的回复数据。\n不含有responseId，先判断HandleName是否存在。\n含有callbackId，说明是由Native主动向H5发出的请求，并需要回调处理，此时H5也需要像Native那样将callbackId改为responseId,并加上responseData通过Schema回传给Native。\n不含有callbackId，说明是由Native主动向H5发出的请求，也不需要回调，H5只需要根据HandleName处理完响应的逻辑即可。\n\n\n\n关键代码实现：123456789101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899100101102103104105106107108109110111112113114115116117118119120121122123124125126127128129130131132133134135/** * @description 原生调用H5页面注册的方法,或者调用回调方法 * @param &#123;String&#125; messageJSON 对应的方法的详情,需要手动转为json */_handleMessageFromNative(messageJSON) &#123;    let that = this;    setTimeout(_doDispatchMessageFromNative);    /**     * @description 处理原生过来的方法     */    function _doDispatchMessageFromNative() &#123;        let message;        // Vue.prototype.$Toast(&#123;        //     content: messageJSON,        //     duration:10000        // &#125;)        // return false;        try &#123;            message = JSON.parse(messageJSON);            // alert(message.handlerName);            // alert(message.responseData.orgOrdst);            // alert(message.responseId);            // return false;        &#125; catch(e) &#123;            //TODO handle the exception            console.error(\"原生调用H5方法出错,传入参数错误\");            return;        &#125;        //回调函数        let responseCallback;        if(message.responseId) &#123;            console.log(that);            //这里规定,原生执行方法完毕后准备通知h5执行回调时,回调函数id是responseId            responseCallback = that.responseCallbacks[message.responseId];            if(!responseCallback) &#123;                return;            &#125;            //执行本地的回调函数            responseCallback(message.responseData);            delete that.responseCallbacks[message.responseId];        &#125; else &#123;            //否则,代表原生主动执行h5本地的函数            if(message.callbackId) &#123;                //先判断是否需要本地H5执行回调函数                //如果需要本地函数执行回调通知原生,那么在本地注册回调函数,然后再调用原生                //回调数据有h5函数执行完毕后传入                let callbackResponseId = message.callbackId;                responseCallback = function(responseData) &#123;                    //默认是调用EJS api上面的函数                    //然后接下来原生知道scheme被调用后主动获取这个信息                    //所以原生这时候应该会进行判断,判断对于函数是否成功执行,并接收数据                    //这时候通讯完毕(由于h5不会对回调添加回调,所以接下来没有通信了)                    that._doSend(&#123;                        handlerName: message.handlerName,                        responseId: callbackResponseId,                        responseData: responseData                    &#125;);                &#125;;            &#125;            //从本地注册的函数中获取            let handler = that.messageHandlers[message.handlerName];            if(!handler) &#123;                //本地没有注册这个函数            &#125; else &#123;                //执行本地函数,按照要求传入数据和回调                handler(message.data, responseCallback);            &#125;        &#125;    &#125;&#125;    /** * @description 原生调用H5页面注册的方法,或者调用回调方法 * @param &#123;String&#125; messageJSON 对应的方法的详情,需要手动转为json */_handleMessageFromNative(messageJSON) &#123;    let that = this;    setTimeout(_doDispatchMessageFromNative);    /**     * @description 处理原生过来的方法     */    function _doDispatchMessageFromNative() &#123;        let message;        try &#123;            message = JSON.parse(messageJSON);        &#125; catch(e) &#123;            //TODO handle the exception            console.error(\"原生调用H5方法出错,传入参数错误\");            return;        &#125;        //回调函数        let responseCallback;        if(message.responseId) &#123;            console.log(that);            //这里规定,原生执行方法完毕后准备通知h5执行回调时,回调函数id是responseId            responseCallback = that.responseCallbacks[message.responseId];            if(!responseCallback) &#123;                return;            &#125;            //执行本地的回调函数            responseCallback(message.responseData);            delete that.responseCallbacks[message.responseId];        &#125; else &#123;            //否则,代表原生主动执行h5本地的函数            if(message.callbackId) &#123;                //先判断是否需要本地H5执行回调函数                //如果需要本地函数执行回调通知原生,那么在本地注册回调函数,然后再调用原生                //回调数据有h5函数执行完毕后传入                let callbackResponseId = message.callbackId;                responseCallback = function(responseData) &#123;                    //默认是调用EJS api上面的函数                    //然后接下来原生知道scheme被调用后主动获取这个信息                    //所以原生这时候应该会进行判断,判断对于函数是否成功执行,并接收数据                    //这时候通讯完毕(由于h5不会对回调添加回调,所以接下来没有通信了)                    that._doSend(&#123;                        handlerName: message.handlerName,                        responseId: callbackResponseId,                        responseData: responseData                    &#125;);                &#125;;            &#125;            //从本地注册的函数中获取            let handler = that.messageHandlers[message.handlerName];            if(!handler) &#123;                //本地没有注册这个函数            &#125; else &#123;                //执行本地函数,按照要求传入数据和回调                handler(message.data, responseCallback);            &#125;        &#125;    &#125;&#125;\nH5本地注册方法Native主动调用H5，需要H5先将方法注册到本地。关键代码实现：\n12345678910/** * @description 注册本地JS方法通过JSBridge给原生调用 * 我们规定,原生必须通过JSBridge来调用H5的方法 * 注意,这里一般对本地函数有一些要求,要求第一个参数是data,第二个参数是callback * @param &#123;String&#125; handlerName 方法名 * @param &#123;Function&#125; handler 对应的方法 */registerHandler(handlerName, handler) &#123;    this.messageHandlers[handlerName] = handler;&#125;\nJSbridge整合到单页应用SPA以上部分，已完成了H5和Native的数据双向通信，JSBridge在单页应用中，可能需要在不同的地方发出通信请求，比如说：每个路由页面、单个组件内部各个生命周期、路由钩子等。这里，以基于Vue构建的单页应用为例。\n在Vue构建的单页应用中，整个单页应用基本上都只有一个Vue实例，还记得在Vue中使用axios,可以在每个组件内这样发出请求:\n123456789this.$http.post('api_url',&#123;\t//请求参数&#125;).then((res)=&gt;&#123;\t//返回数据处理&#125;).catch((err)=&gt;&#123;\t//错误处理&#125;)\n所以，也按照这种形式整合进来，首先在应用入口的位置，我们生成一个JSBridge实例，在new Vue实例之前，将该实例绑定到Vue的prototype，这样便可以在每个整个应用内任何组件的this的原型访问到JSBridge实例。\n关键代码：\n1234import WebviewBridge from './utils/WebviewBridge';const WB = new WebviewBridge();// 绑定Bridge到原型Object.defineProperty(Vue.prototype,'$bridge',&#123;value:WB&#125;)\n这样，便可以在单页应用中的组件内部获取到JSBridge实例，便可以像axios那样发出请求：\n12345this.$bridge.callHandler('方法名',&#123;    //参数&#125;,(res)=&gt;&#123;//回调逻辑&#125;)\n如果，还需要在路由钩子中发出请求，只需要将WB对象引入到路由配置文件即可。\n","dateCreated":"2017-10-23T09:46:20+08:00","dateModified":"2018-06-11T17:42:59+08:00","datePublished":"2017-10-23T09:46:20+08:00","description":"需求背景如果在一个移动端的项目里，百分之八十以上都是嵌入的H5，原生基本上只在是一个壳，并且在H5的业务流程中，也穿插着与Native的通信，不是简简单单的嵌入H5就足够了，这时候，就需要一个极其可靠的H5与Native的通信机制来保证H5和Native的数据交换。其次，如果H5不再是一个多页应用或者传统上的MVC架构，采用的是基于vue、react或者ng开发的单页应用，这时候，就需要保证在H5的任何地方（如组件的各个生命周期、路由等）都可能需要与原生通信。\n那么，这篇文章就是用来总结刚刚在项目里遇到的这个问题，Hybird混合开发模式下嵌入H5单页应用，如何保证Native和H5进行可靠的数据交换和通信？","headline":"Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信","image":[],"mainEntityOfPage":{"@type":"WebPage","@id":"http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/"},"publisher":{"@type":"Organization","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg","logo":{"@type":"ImageObject","url":"pic.jpg"}},"url":"http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/","keywords":"Hybird, Webview, 单页应用"}</script>
+    <meta name="description" content="需求背景如果在一个移动端的项目里，百分之八十以上都是嵌入的H5，原生基本上只在是一个壳，并且在H5的业务流程中，也穿插着与Native的通信，不是简简单单的嵌入H5就足够了，这时候，就需要一个极其可靠的H5与Native的通信机制来保证H5和Native的数据交换。其次，如果H5不再是一个多页应用或者传统上的MVC架构，采用的是基于vue、react或者ng开发的单页应用，这时候，就需要保证在H5">
+<meta name="keywords" content="Hybird,Webview,单页应用">
+<meta property="og:type" content="blog">
+<meta property="og:title" content="Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信">
+<meta property="og:url" content="http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/index.html">
+<meta property="og:site_name" content="Mengyu&#39;s Notes">
+<meta property="og:description" content="需求背景如果在一个移动端的项目里，百分之八十以上都是嵌入的H5，原生基本上只在是一个壳，并且在H5的业务流程中，也穿插着与Native的通信，不是简简单单的嵌入H5就足够了，这时候，就需要一个极其可靠的H5与Native的通信机制来保证H5和Native的数据交换。其次，如果H5不再是一个多页应用或者传统上的MVC架构，采用的是基于vue、react或者ng开发的单页应用，这时候，就需要保证在H5">
+<meta property="og:locale" content="zh-Hans">
+<meta property="og:image" content="http://mife.io/images/2017/10/hybird-jsBridge.png">
+<meta property="og:updated_time" content="2018-06-11T09:42:59.785Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信">
+<meta name="twitter:description" content="需求背景如果在一个移动端的项目里，百分之八十以上都是嵌入的H5，原生基本上只在是一个壳，并且在H5的业务流程中，也穿插着与Native的通信，不是简简单单的嵌入H5就足够了，这时候，就需要一个极其可靠的H5与Native的通信机制来保证H5和Native的数据交换。其次，如果H5不再是一个多页应用或者传统上的MVC架构，采用的是基于vue、react或者ng开发的单页应用，这时候，就需要保证在H5">
+<meta name="twitter:image" content="http://mife.io/images/2017/10/hybird-jsBridge.png">
+    
+    
+        
+    
+    
+        <meta property="og:image" content="http://mife.io/assets/images/pic.jpg"/>
+    
+    
+    
+    
+    <!--STYLES-->
+    <link rel="stylesheet" href="/assets/css/style-1udptkpril81ozu8ifd8zpujn7ipu7lefxsiu5gxx0dpnzntdx6dusvki3ao.min.css">
+    <!--STYLES END-->
+    
+
+    
+    <script type="text/javascript">
+    var _hmt = _hmt || [];
+    (function() {
+      var hm = document.createElement("script");
+      hm.src = "//hm.baidu.com/hm.js?3689bb8a19409b583596dd91730d27d6";
+      var s = document.getElementsByTagName("script")[0];
+      s.parentNode.insertBefore(hm, s);
+    })();
+    </script>
+
+</head>
+
+    <body>
+        <div id="blog">
+            <!-- Define author's picture -->
+
+
+    
+        
+            
+        
+    
+
+<header id="header" data-behavior="5">
+    <i id="btn-open-sidebar" class="fa fa-lg fa-bars"></i>
+    <div class="header-title">
+        <a class="header-title-link" href="/ ">Mengyu&#39;s Notes</a>
+    </div>
+    
+        
+            <a  class="header-right-picture "
+                href="#about">
+        
+        
+            <img class="header-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+        
+        </a>
+    
+</header>
+
+            <!-- Define author's picture -->
+
+
+
+        
+    
+
+<nav id="sidebar" data-behavior="5">
+    <div class="sidebar-container">
+        
+            <div class="sidebar-profile">
+                <a href="/#about">
+                    <img class="sidebar-profile-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+                </a>
+                <h4 class="sidebar-profile-name">Mengyu&#39;s Notes</h4>
+                
+                    <h5 class="sidebar-profile-bio"><p>一身情怀，两手空空</p>
+</h5>
+                
+            </div>
+        
+        
+            <ul class="sidebar-buttons">
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/ "
+                            
+                            title="Home"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-home" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Home</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-archives"
+                            
+                            title="Archives"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-archive" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Archives</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-categories"
+                            
+                            title="Categories"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-bookmark" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Categories</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-tags"
+                            
+                            title="Tags"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-tags" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Tags</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="#about"
+                            
+                            title="About"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-user" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">About</span>
+                    </a>
+            </li>
+            
+        </ul>
+        
+            <ul class="sidebar-buttons">
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link " href="https://github.com/daqd" target="_blank" rel="noopener" title="GitHub">
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-github" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">GitHub</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link " href="mailto:hellojser@gmail.com" target="_blank" rel="noopener" title="Mail">
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-envelope-o" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Mail</span>
+                    </a>
+            </li>
+            
+        </ul>
+        
+    </div>
+</nav>
+
+            
+            <div id="main" data-behavior="5"
+                 class="
+                        hasCoverMetaIn
+                        ">
+                
+<article class="post">
+    
+    
+        <div class="post-header main-content-wrap text-left">
+    
+        <h1 class="post-title">
+            Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信
+        </h1>
+    
+    
+        <div class="post-meta">
+    <time datetime="2017-10-23T09:46:20+08:00">
+	
+		    Oct 23, 2017
+    	
+    </time>
+    
+        <span>in </span>
+        
+    <a class="category-link" href="/categories/APP/">APP</a>
+
+
+    
+</div>
+
+    
+</div>
+
+    
+    <div class="post-content markdown">
+        <div class="main-content-wrap">
+            <h2 id="需求背景"><a href="#需求背景" class="headerlink" title="需求背景"></a>需求背景</h2><p>如果在一个移动端的项目里，百分之八十以上都是嵌入的H5，原生基本上只在是一个壳，并且在H5的业务流程中，也穿插着与Native的通信，不是简简单单的嵌入H5就足够了，这时候，就需要一个极其可靠的H5与Native的通信机制来保证H5和Native的数据交换。其次，如果H5不再是一个多页应用或者传统上的MVC架构，采用的是基于<code>vue</code>、<code>react</code>或者<code>ng</code>开发的单页应用，这时候，就需要保证在H5的任何地方（如组件的各个生命周期、路由等）都可能需要与原生通信。</p>
+<p>那么，这篇文章就是用来总结刚刚在项目里遇到的这个问题，Hybird混合开发模式下嵌入H5单页应用，如何保证Native和H5进行可靠的数据交换和通信？</p>
+<a id="more"></a>
+<h2 id="Webview与H5的通信机制"><a href="#Webview与H5的通信机制" class="headerlink" title="Webview与H5的通信机制"></a>Webview与H5的通信机制</h2><p>网上Webview与H5的通信机制的文章也很多，JSbridge只是其中一种通信机制，也是较为可靠的通信机制，其它通信方式受限于android和IOS的系统版本（<em>因为需要了解原生的开发才能测试，暂未亲自考证过哦，只是通过网络了解的</em>），通过根据网络上的整理（<em>以后有机会亲测过后再来补充，先来占个位</em>），大致分为以下几种：</p>
+<ul>
+<li><p>安卓通过<code>loadUrl</code>方法，IOS通过<code>stringByEvaluatingJavaScriptFromString</code>方法可调用<code>window</code>下的全局函数。</p>
+</li>
+<li><p>webview下可通过<code>onJSAlert</code>、<code>onJSConfirm</code>、<code>onJsPrompt</code>、<code>shouldOverrideUrlLoading</code>监听到JS的<code>alert</code>、<code>confirm</code>、<code>prompt</code>、<code>location</code>方法。</p>
+</li>
+<li><p>JSbridge,由JS搭建的用于与Native通信的桥梁。</p>
+</li>
+</ul>
+<h2 id="JSBridge通信原理"><a href="#JSBridge通信原理" class="headerlink" title="JSBridge通信原理"></a>JSBridge通信原理</h2><p><img src="/images/2017/10/hybird-jsBridge.png" alt="jsBridge"></p>
+<p>JSBridge是一种通信理念，Native端的Webview可以拦截H5端的所有请求，比如普通的http请求:<code>http://xx.com?type=getToken</code>，H5也可以自定义协议，需要与Native约定，比如：<code>appName://getMessage?type=getToken</code>，所以，H5端需要和Native约定一个通信数据结构，H5按照这种这种数据结构通过<code>Schema url</code>的形式发出，Native捕获并按照之前双方的约定对数据结构进行解析，再通过调用H5暴露在全局的方法将数据回传给H5，就完成了基础的H5与Native的数据通信。</p>
+<h2 id="Url-Scheme"><a href="#Url-Scheme" class="headerlink" title="Url Scheme"></a>Url Scheme</h2><p>前面说到，Native可以捕获到所有H5的请求，那么H5该以什么样的形式发出请求呢？</p>
+<ul>
+<li><p>window.href=”appName://getMessage?type=getToken”</p>
+</li>
+<li><p>iframe.src=”appName://getMessage?type=getToken”</p>
+</li>
+</ul>
+<p>以上两种形式都可以在前端页面发出请求，第一种为页面跳转，第二种为在页面内加入iframe框架，在单页应用中，不可能每次都要跳页，单页应用这种架构除了首屏加载慢的弊端，也尽量避讳跳页，因为这种情况下，如果部分视图开启了<code>keep-live</code>,或者如果有些数据状态存在了<code>vuex</code>，<code>redux</code>等这种第三方状态管理中，会导致状态数据和页面状态丢失，这显然不是所期望出现的状况。所以，第二种才是比较好的发送Schema的方式。</p>
+<p>代码实现：</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">export</span> <span class="keyword">default</span> <span class="class"><span class="keyword">class</span> <span class="title">JSBridge</span></span>&#123;</span><br><span class="line">	<span class="keyword">constructor</span>()&#123;&#125;</span><br><span class="line">	<span class="comment">//...other Methods</span></span><br><span class="line">	createIframe(uri)&#123;</span><br><span class="line">		<span class="keyword">this</span>.messagingIframe = <span class="built_in">document</span>.createElement(<span class="string">'iframe'</span>);</span><br><span class="line">        <span class="keyword">this</span>.messagingIframe.style.display = <span class="string">'none'</span>;</span><br><span class="line">        <span class="keyword">this</span>.messagingIframe.src = <span class="keyword">this</span>.CUSTOM_PROTOCOL_SCHEME + <span class="string">'://'</span> + <span class="keyword">this</span>.API_Name;</span><br><span class="line">        <span class="comment">//采用iframe跳转scheme的方法</span></span><br><span class="line">        <span class="keyword">this</span>.messagingIframe.src = uri;</span><br><span class="line">        <span class="built_in">document</span>.documentElement.appendChild(<span class="keyword">this</span>.messagingIframe);</span><br><span class="line">        <span class="keyword">let</span> that = <span class="keyword">this</span>;</span><br><span class="line">        setTimeout(<span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">            that.messagingIframe.remove();</span><br><span class="line">        &#125;, <span class="number">100</span>);</span><br><span class="line"></span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h2 id="H5发送Schema-url"><a href="#H5发送Schema-url" class="headerlink" title="H5发送Schema url"></a>H5发送Schema url</h2><p>细化<strong>JSBridge通信原理</strong>一小节中的H5发送Schema的流程，H5端在发送消息只需要以下这种形式发送即可。<br><figure class="highlight less"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//需要回调处理返回的数据</span></span><br><span class="line"><span class="selector-tag">JSBridge</span><span class="selector-class">.send</span>(<span class="string">'native监听的方法名字'</span>,&#123;</span><br><span class="line">	<span class="comment">//这里是发送给Native的数据</span></span><br><span class="line">	&#125;,(responseData)=&gt;&#123;</span><br><span class="line">		<span class="comment">//H5接收到Native回传的数据的回调方法</span></span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure></p>
+<p>或<br><figure class="highlight less"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//不需要回调处理返回的数据</span></span><br><span class="line"><span class="selector-tag">JSBridge</span><span class="selector-class">.send</span>(<span class="string">'native监听的方法名字'</span>,&#123;</span><br><span class="line">	<span class="comment">//这里是发送给Native的数据</span></span><br><span class="line">	&#125;)</span><br></pre></td></tr></table></figure></p>
+<p>从上面可以接受到两个或者三个参数，分别是Native监听的方法名、传给Native的数据、Native传回数据后H5端需要执行的回调方法，在<code>send</code>方法内需要做以下处理逻辑：</p>
+<ul>
+<li><p>根据参数argumens个数，判断是否需要回调处理，需要回调，则生成一个随机数作为key值，回调方法作为value存入本地一个callbackMethods对象中，并将随机数作为callbackId的值存入传给Native的数据对象中。</p>
+</li>
+<li><p>根据UA判断当前环境是IOS还是安卓：</p>
+<ul>
+<li><p>IOS则将handleName，callbackId和data存入本地一个对象中，H5提供一个方法<code>_fetchQueue</code>获取。</p>
+</li>
+<li><p>安卓，则将handleName,callbackId和data拼成Url，付给iframe的src。</p>
+</li>
+</ul>
+</li>
+<li><p>调用Iframe，发出请求消息。</p>
+</li>
+</ul>
+<p>关键代码实现：</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br></pre></td><td class="code"><pre><span class="line"> _doSend(message, responseCallback) &#123;</span><br><span class="line">     <span class="keyword">if</span>(responseCallback) &#123;</span><br><span class="line">         <span class="comment">//取到一个唯一的callbackid</span></span><br><span class="line">         <span class="keyword">let</span> callbackId = <span class="keyword">this</span>.getCallbackId();</span><br><span class="line">         <span class="comment">//回调函数添加到集合中</span></span><br><span class="line">         <span class="keyword">this</span>.responseCallbacks[callbackId] = responseCallback;</span><br><span class="line">         <span class="comment">//方法的详情添加回调函数的关键标识</span></span><br><span class="line">         message[<span class="string">'callbackId'</span>] = callbackId;</span><br><span class="line">     &#125;</span><br><span class="line">     <span class="keyword">let</span> uri;</span><br><span class="line">     <span class="comment">//android中,可以通过onJsPrompt或者截取Url访问都行</span></span><br><span class="line">     <span class="keyword">let</span> ua = navigator.userAgent;</span><br><span class="line">     <span class="keyword">if</span>(ua.match(<span class="regexp">/(iPhone\sOS)\s([\d_]+)/</span>)||ua.match(<span class="regexp">/(iPad).*OS\s([\d_]+)/</span>)) &#123;</span><br><span class="line">         <span class="comment">//ios中,通过截取客户端url访问</span></span><br><span class="line">         <span class="comment">//因为ios可以不暴露scheme,而是由原生手动获取</span></span><br><span class="line">         <span class="comment">//正在调用的方法详情添加进入消息队列中,原生会主动获取</span></span><br><span class="line">         <span class="built_in">console</span>.log(message);</span><br><span class="line">         <span class="built_in">window</span>[<span class="keyword">this</span>.JSBridgeName].sendMessageQueue.push(message);</span><br><span class="line">         <span class="comment">// window[this.JSBridgeName].sendMessageQueue = message;</span></span><br><span class="line">         uri = <span class="keyword">this</span>.getUri();</span><br><span class="line">     &#125;<span class="keyword">else</span>&#123;</span><br><span class="line">         <span class="comment">//android中兼容处理,将所有的参数一起拼接到url中</span></span><br><span class="line">         uri = <span class="keyword">this</span>.getUri(message);</span><br><span class="line">     &#125;</span><br><span class="line">     <span class="comment">//获取 触发方法的url scheme</span></span><br><span class="line">     <span class="comment">//进行url scheme传值的iframe</span></span><br><span class="line"><span class="keyword">this</span>.createIframe(uri);</span><br><span class="line"> &#125;</span><br></pre></td></tr></table></figure>
+<h2 id="IOS获取数据消息"><a href="#IOS获取数据消息" class="headerlink" title="IOS获取数据消息"></a>IOS获取数据消息</h2><p>IOS可调用该方法获取到H5发出的消息队列。<br><figure class="highlight gauss"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * iOS专用</span></span><br><span class="line"><span class="comment"> * @description 当本地调用了callHandler之后,实际是调用了通用的scheme,通知原生</span></span><br><span class="line"><span class="comment"> * 然后原生通过调用这个方法来获知当前正在调用的方法队列</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line">_fetchQueue() &#123;</span><br><span class="line">    <span class="comment">// let messageQueueString = JSON.stringify(window.JSBridgeFor9AIR.sendMessageQueue);</span></span><br><span class="line">    <span class="keyword">let</span> message =  <span class="built_in">window</span>.JSBridgeFor9AIR.sendMessageQueue;</span><br><span class="line">    <span class="built_in">window</span>.JSBridgeFor9AIR.sendMessageQueue = [];</span><br><span class="line">    <span class="comment">// window.JSBridgeFor9AIR.sendMessageQueue = &#123;&#125;;        </span></span><br><span class="line">    <span class="keyword">return</span> message;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<h2 id="Native调用H5-回传数据给H5"><a href="#Native调用H5-回传数据给H5" class="headerlink" title="Native调用H5/回传数据给H5"></a>Native调用H5/回传数据给H5</h2><p>到这里，H5已经按照固定的数据格式通过Schema将数据传给了Native，Native拿到这些数据会将<code>callbackId</code>取出来，并将值付给key为<code>responseId</code>的对象，该对象内还有一个字段为<code>responseData</code>，里面存放的是Native回传给H5的数据，Native如何将组装好的数据传给H5呢？</p>
+<p>Native可以主动调用Window全局下的JS方法，所以，在H5端准备一个全局可访问到的JS方法(_handleMessageFromNative<br>)，该方法有一个参数，参数便就是Native组装的数据，这样就可以回传数据给H5，该方法内对数据应该做以下处理逻辑：</p>
+<ul>
+<li>取出responseId,去callbackMethods对象取出响应的回调方法</li>
+<li>将responseData作为该回调方法的参数传入，回调方法执行响应的处理逻辑。</li>
+<li>再次发送一个不需要回调方法的Schema,通知客户端已接收到数据。</li>
+</ul>
+<p>至此，一次由H5发出消息-&gt;Native接收消息并回复-&gt;H5接收到回复消息通知Native接收成功的通信完成了闭环。</p>
+<p><strong>是不是该贴代码了？？ 再等等，还有一个问题</strong></p>
+<p>从开始到现在，所有的通信都是先由H5发出，由Native接收到并处理完之后回传给H5，当然，并不可能所有的场景都必须要H5先发出，Native也需要在一定的场景下主动调用H5的方法。</p>
+<p>不管是Native回复H5的数据，还是，Native主动调用H5，都是通过Native调用H5暴露在Window下的全局方法，H5端已经暴露出了<code>_handleMessageFromNative</code>方法供Native回复数据，之后只需要在这个方法内部添加逻辑，然后区分是Native回复数据还是主动调用H5的逻辑即可。</p>
+<p>所以，该方法的处理逻辑现在变成了这样：</p>
+<ul>
+<li>含有responseId，说明是由H5端发出的通信请求，Native处理完之后的回复数据。</li>
+<li>不含有responseId，先判断HandleName是否存在。<ul>
+<li>含有callbackId，说明是由Native主动向H5发出的请求，并需要回调处理，此时H5也需要像Native那样将callbackId改为responseId,并加上responseData通过<code>Schema</code>回传给Native。</li>
+<li>不含有callbackId，说明是由Native主动向H5发出的请求，也不需要回调，H5只需要根据HandleName处理完响应的逻辑即可。</li>
+</ul>
+</li>
+</ul>
+<p>关键代码实现：<br><figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br><span class="line">94</span><br><span class="line">95</span><br><span class="line">96</span><br><span class="line">97</span><br><span class="line">98</span><br><span class="line">99</span><br><span class="line">100</span><br><span class="line">101</span><br><span class="line">102</span><br><span class="line">103</span><br><span class="line">104</span><br><span class="line">105</span><br><span class="line">106</span><br><span class="line">107</span><br><span class="line">108</span><br><span class="line">109</span><br><span class="line">110</span><br><span class="line">111</span><br><span class="line">112</span><br><span class="line">113</span><br><span class="line">114</span><br><span class="line">115</span><br><span class="line">116</span><br><span class="line">117</span><br><span class="line">118</span><br><span class="line">119</span><br><span class="line">120</span><br><span class="line">121</span><br><span class="line">122</span><br><span class="line">123</span><br><span class="line">124</span><br><span class="line">125</span><br><span class="line">126</span><br><span class="line">127</span><br><span class="line">128</span><br><span class="line">129</span><br><span class="line">130</span><br><span class="line">131</span><br><span class="line">132</span><br><span class="line">133</span><br><span class="line">134</span><br><span class="line">135</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * @description 原生调用H5页面注册的方法,或者调用回调方法</span></span><br><span class="line"><span class="comment"> * @param &#123;String&#125; messageJSON 对应的方法的详情,需要手动转为json</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line">_handleMessageFromNative(messageJSON) &#123;</span><br><span class="line">    <span class="keyword">let</span> that = <span class="keyword">this</span>;</span><br><span class="line">    setTimeout(_doDispatchMessageFromNative);</span><br><span class="line">    <span class="comment">/**</span></span><br><span class="line"><span class="comment">     * @description 处理原生过来的方法</span></span><br><span class="line"><span class="comment">     */</span></span><br><span class="line">    <span class="function"><span class="keyword">function</span> <span class="title">_doDispatchMessageFromNative</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">        <span class="keyword">let</span> message;</span><br><span class="line">        <span class="comment">// Vue.prototype.$Toast(&#123;</span></span><br><span class="line">        <span class="comment">//     content: messageJSON,</span></span><br><span class="line">        <span class="comment">//     duration:10000</span></span><br><span class="line">        <span class="comment">// &#125;)</span></span><br><span class="line">        <span class="comment">// return false;</span></span><br><span class="line">        <span class="keyword">try</span> &#123;</span><br><span class="line">            message = <span class="built_in">JSON</span>.parse(messageJSON);</span><br><span class="line">            <span class="comment">// alert(message.handlerName);</span></span><br><span class="line">            <span class="comment">// alert(message.responseData.orgOrdst);</span></span><br><span class="line">            <span class="comment">// alert(message.responseId);</span></span><br><span class="line"></span><br><span class="line">            <span class="comment">// return false;</span></span><br><span class="line">        &#125; <span class="keyword">catch</span>(e) &#123;</span><br><span class="line">            <span class="comment">//TODO handle the exception</span></span><br><span class="line">            <span class="built_in">console</span>.error(<span class="string">"原生调用H5方法出错,传入参数错误"</span>);</span><br><span class="line">            <span class="keyword">return</span>;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="comment">//回调函数</span></span><br><span class="line">        <span class="keyword">let</span> responseCallback;</span><br><span class="line">        <span class="keyword">if</span>(message.responseId) &#123;</span><br><span class="line">            <span class="built_in">console</span>.log(that);</span><br><span class="line">            <span class="comment">//这里规定,原生执行方法完毕后准备通知h5执行回调时,回调函数id是responseId</span></span><br><span class="line">            responseCallback = that.responseCallbacks[message.responseId];</span><br><span class="line">            <span class="keyword">if</span>(!responseCallback) &#123;</span><br><span class="line">                <span class="keyword">return</span>;</span><br><span class="line">            &#125;</span><br><span class="line">            <span class="comment">//执行本地的回调函数</span></span><br><span class="line">            responseCallback(message.responseData);</span><br><span class="line">            <span class="keyword">delete</span> that.responseCallbacks[message.responseId];</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="comment">//否则,代表原生主动执行h5本地的函数</span></span><br><span class="line">            <span class="keyword">if</span>(message.callbackId) &#123;</span><br><span class="line">                <span class="comment">//先判断是否需要本地H5执行回调函数</span></span><br><span class="line">                <span class="comment">//如果需要本地函数执行回调通知原生,那么在本地注册回调函数,然后再调用原生</span></span><br><span class="line">                <span class="comment">//回调数据有h5函数执行完毕后传入</span></span><br><span class="line">                <span class="keyword">let</span> callbackResponseId = message.callbackId;</span><br><span class="line">                responseCallback = <span class="function"><span class="keyword">function</span>(<span class="params">responseData</span>) </span>&#123;</span><br><span class="line">                    <span class="comment">//默认是调用EJS api上面的函数</span></span><br><span class="line">                    <span class="comment">//然后接下来原生知道scheme被调用后主动获取这个信息</span></span><br><span class="line">                    <span class="comment">//所以原生这时候应该会进行判断,判断对于函数是否成功执行,并接收数据</span></span><br><span class="line">                    <span class="comment">//这时候通讯完毕(由于h5不会对回调添加回调,所以接下来没有通信了)</span></span><br><span class="line">                    that._doSend(&#123;</span><br><span class="line">                        handlerName: message.handlerName,</span><br><span class="line">                        responseId: callbackResponseId,</span><br><span class="line">                        responseData: responseData</span><br><span class="line">                    &#125;);</span><br><span class="line">                &#125;;</span><br><span class="line">            &#125;</span><br><span class="line"></span><br><span class="line">            <span class="comment">//从本地注册的函数中获取</span></span><br><span class="line">            <span class="keyword">let</span> handler = that.messageHandlers[message.handlerName];</span><br><span class="line">            <span class="keyword">if</span>(!handler) &#123;</span><br><span class="line">                <span class="comment">//本地没有注册这个函数</span></span><br><span class="line">            &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">                <span class="comment">//执行本地函数,按照要求传入数据和回调</span></span><br><span class="line">                handler(message.data, responseCallback);</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;    <span class="comment">/**</span></span><br><span class="line"><span class="comment"> * @description 原生调用H5页面注册的方法,或者调用回调方法</span></span><br><span class="line"><span class="comment"> * @param &#123;String&#125; messageJSON 对应的方法的详情,需要手动转为json</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line">_handleMessageFromNative(messageJSON) &#123;</span><br><span class="line">    <span class="keyword">let</span> that = <span class="keyword">this</span>;</span><br><span class="line">    setTimeout(_doDispatchMessageFromNative);</span><br><span class="line">    <span class="comment">/**</span></span><br><span class="line"><span class="comment">     * @description 处理原生过来的方法</span></span><br><span class="line"><span class="comment">     */</span></span><br><span class="line">    <span class="function"><span class="keyword">function</span> <span class="title">_doDispatchMessageFromNative</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">        <span class="keyword">let</span> message;</span><br><span class="line">        <span class="keyword">try</span> &#123;</span><br><span class="line">            message = <span class="built_in">JSON</span>.parse(messageJSON);</span><br><span class="line">        &#125; <span class="keyword">catch</span>(e) &#123;</span><br><span class="line">            <span class="comment">//TODO handle the exception</span></span><br><span class="line">            <span class="built_in">console</span>.error(<span class="string">"原生调用H5方法出错,传入参数错误"</span>);</span><br><span class="line">            <span class="keyword">return</span>;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="comment">//回调函数</span></span><br><span class="line">        <span class="keyword">let</span> responseCallback;</span><br><span class="line">        <span class="keyword">if</span>(message.responseId) &#123;</span><br><span class="line">            <span class="built_in">console</span>.log(that);</span><br><span class="line">            <span class="comment">//这里规定,原生执行方法完毕后准备通知h5执行回调时,回调函数id是responseId</span></span><br><span class="line">            responseCallback = that.responseCallbacks[message.responseId];</span><br><span class="line">            <span class="keyword">if</span>(!responseCallback) &#123;</span><br><span class="line">                <span class="keyword">return</span>;</span><br><span class="line">            &#125;</span><br><span class="line">            <span class="comment">//执行本地的回调函数</span></span><br><span class="line">            responseCallback(message.responseData);</span><br><span class="line">            <span class="keyword">delete</span> that.responseCallbacks[message.responseId];</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="comment">//否则,代表原生主动执行h5本地的函数</span></span><br><span class="line">            <span class="keyword">if</span>(message.callbackId) &#123;</span><br><span class="line">                <span class="comment">//先判断是否需要本地H5执行回调函数</span></span><br><span class="line">                <span class="comment">//如果需要本地函数执行回调通知原生,那么在本地注册回调函数,然后再调用原生</span></span><br><span class="line">                <span class="comment">//回调数据有h5函数执行完毕后传入</span></span><br><span class="line">                <span class="keyword">let</span> callbackResponseId = message.callbackId;</span><br><span class="line">                responseCallback = <span class="function"><span class="keyword">function</span>(<span class="params">responseData</span>) </span>&#123;</span><br><span class="line">                    <span class="comment">//默认是调用EJS api上面的函数</span></span><br><span class="line">                    <span class="comment">//然后接下来原生知道scheme被调用后主动获取这个信息</span></span><br><span class="line">                    <span class="comment">//所以原生这时候应该会进行判断,判断对于函数是否成功执行,并接收数据</span></span><br><span class="line">                    <span class="comment">//这时候通讯完毕(由于h5不会对回调添加回调,所以接下来没有通信了)</span></span><br><span class="line">                    that._doSend(&#123;</span><br><span class="line">                        handlerName: message.handlerName,</span><br><span class="line">                        responseId: callbackResponseId,</span><br><span class="line">                        responseData: responseData</span><br><span class="line">                    &#125;);</span><br><span class="line">                &#125;;</span><br><span class="line">            &#125;</span><br><span class="line"></span><br><span class="line">            <span class="comment">//从本地注册的函数中获取</span></span><br><span class="line">            <span class="keyword">let</span> handler = that.messageHandlers[message.handlerName];</span><br><span class="line">            <span class="keyword">if</span>(!handler) &#123;</span><br><span class="line">                <span class="comment">//本地没有注册这个函数</span></span><br><span class="line">            &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">                <span class="comment">//执行本地函数,按照要求传入数据和回调</span></span><br><span class="line">                handler(message.data, responseCallback);</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<h2 id="H5本地注册方法"><a href="#H5本地注册方法" class="headerlink" title="H5本地注册方法"></a>H5本地注册方法</h2><p>Native主动调用H5，需要H5先将方法注册到本地。<br>关键代码实现：</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * <span class="doctag">@description</span> 注册本地JS方法通过JSBridge给原生调用</span></span><br><span class="line"><span class="comment"> * 我们规定,原生必须通过JSBridge来调用H5的方法</span></span><br><span class="line"><span class="comment"> * 注意,这里一般对本地函数有一些要求,要求第一个参数是data,第二个参数是callback</span></span><br><span class="line"><span class="comment"> * <span class="doctag">@param</span> &#123;String&#125; handlerName 方法名</span></span><br><span class="line"><span class="comment"> * <span class="doctag">@param</span> &#123;Function&#125; handler 对应的方法</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line">registerHandler(handlerName, <span class="keyword">handler</span>) &#123;</span><br><span class="line">    <span class="keyword">this</span>.messageHandlers[handlerName] = <span class="keyword">handler</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h2 id="JSbridge整合到单页应用SPA"><a href="#JSbridge整合到单页应用SPA" class="headerlink" title="JSbridge整合到单页应用SPA"></a>JSbridge整合到单页应用SPA</h2><p>以上部分，已完成了H5和Native的数据双向通信，JSBridge在单页应用中，可能需要在不同的地方发出通信请求，比如说：每个路由页面、单个组件内部各个生命周期、路由钩子等。这里，以基于Vue构建的单页应用为例。</p>
+<p>在Vue构建的单页应用中，整个单页应用基本上都只有一个Vue实例，还记得在Vue中使用<code>axios</code>,可以在每个组件内这样发出请求:</p>
+<figure class="highlight coffeescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">this</span>.$http.post(<span class="string">'api_url'</span>,&#123;</span><br><span class="line">	<span class="regexp">//</span>请求参数</span><br><span class="line">&#125;)</span><br><span class="line">.<span class="keyword">then</span>(<span class="function"><span class="params">(res)</span>=&gt;</span>&#123;</span><br><span class="line">	<span class="regexp">//</span>返回数据处理</span><br><span class="line">&#125;)</span><br><span class="line">.<span class="keyword">catch</span>(<span class="function"><span class="params">(err)</span>=&gt;</span>&#123;</span><br><span class="line">	<span class="regexp">//</span>错误处理</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+<p>所以，也按照这种形式整合进来，首先在应用入口的位置，我们生成一个JSBridge实例，在<code>new Vue</code>实例之前，将该实例绑定到Vue的<code>prototype</code>，这样便可以在每个整个应用内任何组件的this的原型访问到JSBridge实例。</p>
+<p>关键代码：</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> WebviewBridge <span class="keyword">from</span> <span class="string">'./utils/WebviewBridge'</span>;</span><br><span class="line"><span class="keyword">const</span> WB = <span class="keyword">new</span> WebviewBridge();</span><br><span class="line"><span class="comment">// 绑定Bridge到原型</span></span><br><span class="line"><span class="built_in">Object</span>.defineProperty(Vue.prototype,<span class="string">'$bridge'</span>,&#123;<span class="attr">value</span>:WB&#125;)</span><br></pre></td></tr></table></figure>
+<p>这样，便可以在单页应用中的组件内部获取到JSBridge实例，便可以像axios那样发出请求：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">this</span>.$bridge.callHandler(<span class="string">'方法名'</span>,&#123;</span><br><span class="line">    <span class="comment">//参数</span></span><br><span class="line">&#125;,<span class="function">(<span class="params">res</span>)=&gt;</span>&#123;</span><br><span class="line"><span class="comment">//回调逻辑</span></span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+<p>如果，还需要在路由钩子中发出请求，只需要将WB对象引入到路由配置文件即可。</p>
+
+            
+
+        </div>
+    </div>
+    <div id="post-footer" class="post-footer main-content-wrap">
+        
+            <div class="post-footer-tags">
+                <span class="text-color-light text-small">TAGGED IN</span><br/>
+                
+    <a class="tag tag--primary tag--small t-link" href="/tags/Hybird/">Hybird</a> <a class="tag tag--primary tag--small t-link" href="/tags/Webview/">Webview</a> <a class="tag tag--primary tag--small t-link" href="/tags/单页应用/">单页应用</a>
+
+            </div>
+        
+        
+            <div class="post-actions-wrap">
+    <nav>
+        <ul class="post-actions post-action-nav">
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/" data-tooltip="HTML5的图片上传、预览与压缩功能的实现" aria-label="PREVIOUS: HTML5的图片上传、预览与压缩功能的实现">
+                
+                    <i class="fa fa-angle-left" aria-hidden="true"></i>
+                    <span class="hide-xs hide-sm text-small icon-ml">PREVIOUS</span>
+                </a>
+            </li>
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2016/12/31/2016年度总结/" data-tooltip="2016年度总结" aria-label="NEXT: 2016年度总结">
+                
+                    <span class="hide-xs hide-sm text-small icon-mr">NEXT</span>
+                    <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+    <ul class="post-actions post-action-share">
+        <li class="post-action hide-lg hide-md hide-sm">
+            <a class="post-action-btn btn btn--default btn-open-shareoptions" href="#btn-open-shareoptions" aria-label="Share this post">
+                <i class="fa fa-share-alt" aria-hidden="true"></i>
+            </a>
+        </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/" title="Share on Weibo">
+                    <i class="fa fa-weibo" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/&amp;title=Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信" title="Share on QQ">
+                    <i class="fa fa-qq" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/" title="Share on Qzone">
+                    <i class="fa fa-star" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+        
+            
+                <li class="post-action">
+                    <a class="post-action-btn btn btn--default" href="#disqus_thread">
+                        <i class="fa fa-comment-o"></i>
+                    </a>
+                </li>
+            
+        
+        <li class="post-action">
+            
+                <a class="post-action-btn btn btn--default" href="#" aria-label="Back to top">
+            
+                <i class="fa fa-list" aria-hidden="true"></i>
+            </a>
+        </li>
+    </ul>
+</div>
+
+
+        
+        
+            
+                <div id="disqus_thread">
+    <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+</div>
+            
+        
+    </div>
+</article>
+
+
+
+                <footer id="footer" class="main-content-wrap">
+    <span class="copyrights">
+        Copyrights &copy; 2018 Mengyu&#39;s Notes. All Rights Reserved.
+    </span>
+</footer>
+
+            </div>
+            
+                <div id="bottom-bar" class="post-bottom-bar" data-behavior="5">
+                    <div class="post-actions-wrap">
+    <nav>
+        <ul class="post-actions post-action-nav">
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/" data-tooltip="HTML5的图片上传、预览与压缩功能的实现" aria-label="PREVIOUS: HTML5的图片上传、预览与压缩功能的实现">
+                
+                    <i class="fa fa-angle-left" aria-hidden="true"></i>
+                    <span class="hide-xs hide-sm text-small icon-ml">PREVIOUS</span>
+                </a>
+            </li>
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2016/12/31/2016年度总结/" data-tooltip="2016年度总结" aria-label="NEXT: 2016年度总结">
+                
+                    <span class="hide-xs hide-sm text-small icon-mr">NEXT</span>
+                    <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+    <ul class="post-actions post-action-share">
+        <li class="post-action hide-lg hide-md hide-sm">
+            <a class="post-action-btn btn btn--default btn-open-shareoptions" href="#btn-open-shareoptions" aria-label="Share this post">
+                <i class="fa fa-share-alt" aria-hidden="true"></i>
+            </a>
+        </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/" title="Share on Weibo">
+                    <i class="fa fa-weibo" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/&amp;title=Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信" title="Share on QQ">
+                    <i class="fa fa-qq" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/" title="Share on Qzone">
+                    <i class="fa fa-star" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+        
+            
+                <li class="post-action">
+                    <a class="post-action-btn btn btn--default" href="#disqus_thread">
+                        <i class="fa fa-comment-o"></i>
+                    </a>
+                </li>
+            
+        
+        <li class="post-action">
+            
+                <a class="post-action-btn btn btn--default" href="#" aria-label="Back to top">
+            
+                <i class="fa fa-list" aria-hidden="true"></i>
+            </a>
+        </li>
+    </ul>
+</div>
+
+
+                </div>
+                <div id="share-options-bar" class="share-options-bar" data-behavior="5">
+    <i id="btn-close-shareoptions" class="fa fa-close"></i>
+    <ul class="share-options">
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/">
+                    <i class="fa fa-weibo" aria-hidden="true"></i><span>Share on Weibo</span>
+                </a>
+            </li>
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/&amp;title=Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信">
+                    <i class="fa fa-qq" aria-hidden="true"></i><span>Share on QQ</span>
+                </a>
+            </li>
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/">
+                    <i class="fa fa-star" aria-hidden="true"></i><span>Share on Qzone</span>
+                </a>
+            </li>
+        
+    </ul>
+</div>
+
+            
+        </div>
+        
+
+
+    
+        
+    
+
+<div id="about">
+    <div id="about-card">
+        <div id="about-btn-close">
+            <i class="fa fa-remove"></i>
+        </div>
+        
+            <img id="about-card-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+        
+            <h4 id="about-card-name">Mengyu&#39;s Notes</h4>
+        
+            <div id="about-card-bio"><p>一身情怀，两手空空</p>
+</div>
+        
+        
+            <div id="about-card-job">
+                <i class="fa fa-briefcase"></i>
+                <br/>
+                <p>FE</p>
+
+            </div>
+        
+        
+            <div id="about-card-location">
+                <i class="fa fa-map-marker"></i>
+                <br/>
+                Beijing
+            </div>
+        
+    </div>
+</div>
+
+        
+        
+<div id="cover" style="background-image:url('/assets/images/cover-v1.2.0.jpg');"></div>
+        <!--SCRIPTS-->
+<script src="/assets/js/script-yhuo2grt8r7qkqumzgjoglkfbicl1thukjgmla6jopu56zpcowfedi5zjcor.min.js"></script>
+<!--SCRIPTS END-->
+
+    
+        <script>
+             var disqus_config = function () {
+                 this.page.url = 'http://mife.io/2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/';
+                 
+                    this.page.identifier = '2017/10/23/Hybird混合开发模式之Webview内嵌单页应用SPA与Native的数据通信/';
+                 
+             };
+            (function() {
+                var d = document, s = d.createElement('script');
+                var disqus_shortname = 'mife';
+                s.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+
+                s.setAttribute('data-timestamp', +new Date());
+                (d.head || d.body).appendChild(s);
+            })();
+        </script>
+    
+
+
+
+    </body>
+</html>
