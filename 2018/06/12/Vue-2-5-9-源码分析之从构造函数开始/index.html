@@ -1,0 +1,577 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hans">
+    
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="generator" content="Mengyu&#39;s Notes">
+    <title>Vue 2.5.9 源码分析（一） ~ 从构造函数开始 - Mengyu&#39;s Notes</title>
+    <meta name="author" content="Mengyu&#39;s Notes">
+    
+    
+        <link rel="icon" href="http://mife.io/assets/images/favicon.ico">
+    
+    
+    <script type="application/ld+json">{"@context":"http://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg"},"articleBody":"查找入口随着近几年前端工程化、自动化构建的兴起，越来越多的前端项目开始依赖于一种或多种构建工具协助开发和打包，每当从Github上download下一份项目代码，习惯性的先打开根目录下的package.json文件，里面的描述信息包含了入口文件、项目说明、第三方依赖、script执行脚本等等关键信息，通过这里也可以了解该项目的第一手信息。\n在Vue源码的解析的最开始，我们继续延用之前的方式，先从package.json文件开始，以这里作为起点，沿着一条主线，看一看Vue构造函数是如何产生的。\npackage.json打开package.json文件，可以看到如下script执行脚本：\n123456\"scripts\": &#123;  \"dev\": \"rollup -w -c build/config.js --environment TARGET:web-full-dev\",  \"dev:cjs\": \"rollup -w -c build/config.js --environment TARGET:web-runtime-cjs\",  \"dev:esm\": \"rollup -w -c build/config.js --environment TARGET:web-runtime-esm\",  ... &#125;\n从上面可以看出，Vue使用了 rollup.js 构建工具来构建整个项目，rollup构建的配置信息在build/config.js文件中，通过TARGET参数来提取不同的配置信息，如下：\n123456789101112131415161718192021222324252627282930313233343536373839const builds = &#123;  ...,  'web-full-cjs': &#123;    entry: resolve('web/entry-runtime-with-compiler.js'),    dest: resolve('dist/vue.common.js'),    format: 'cjs',    alias: &#123; he: './entity-decoder' &#125;,    banner  &#125;,  ....,  'web-full-dev': &#123;    entry: resolve('web/entry-runtime-with-compiler.js'),    dest: resolve('dist/vue.js'),    format: 'umd',    env: 'development',    alias: &#123; he: './entity-decoder' &#125;,    banner  &#125;,  ....&#125;function genConfig (name) &#123;  const opts = builds[name]  const config = &#123;    input: opts.entry,    external: opts.external,    plugins: [...],    output: &#123;...&#125;  &#125;  ...  return config&#125;if (process.env.TARGET) &#123;  module.exports = genConfig(process.env.TARGET)&#125; else &#123;\t...&#125;\n以上为删减后的代码，重点保留了rollup的构建配置参数，config.js文件最终导出的是genConfig的返回值，genConfig函数接收TARGET作为参数，从builds对象中提取对应的配置信息，在genConfig内部转换成rollup可以识别的配置参数，在这里，我们重点需要关注的是其中的input参数，它是rollup构建的入口文件，类似于Webpack的entry。\n从配置信息可以发现，TARGET为web-full-cjs和web-full-dev的区别只在于format的值不同，这里正是为了打包出不同格式的模块，如：AMD 、 UMD 、commonJS，其中默认打包umd格式。\nalias当前我们已经找到了input就是rollup构建的入口，可是我们发现input的值为：resolve(&#39;web/entry-runtime-with-compiler.js&#39;)，那么，web是指的哪里呢？\nwebpack和rollup这些构建工具都提供了alias的配置项，目的是在项目的不同层级目录中更方便的调用某个文件，在之前的genConfig方法中，为了突出重点，省略了alias的配置，省略的部分如下：\n123456789101112131415const aliases = require('./alias');function genConfig (name) &#123;  const opts = builds[name]  const config = &#123;  \t...    plugins: [      ...      alias(Object.assign(&#123;&#125;, aliases, opts.alias))    ].concat(opts.plugins || []),    ...  &#125;  ...  return config&#125;\nalias.js的内容如下：\n1234567891011module.exports = &#123;  vue: resolve('src/platforms/web/entry-runtime-with-compiler'),  compiler: resolve('src/compiler'),  core: resolve('src/core'),  shared: resolve('src/shared'),  web: resolve('src/platforms/web'),  weex: resolve('src/platforms/weex'),  server: resolve('src/server'),  entries: resolve('src/entries'),  sfc: resolve('src/sfc')&#125;\n除了web，alias.js还配置了其它常用到的目录别名，在后面的源码阅读过程中也会用到。\n从构造函数开始在上一小节，我们已经找到了rollup打包构建的入口文件，那就是别名为web的entry-runtime-with-compiler.js，在该文件中，为Vue构造方法挂载了一个compile的静态方法；并且，从下面的代码可以看出：覆盖掉了之前定义的$mount方法。12const mount = Vue.prototype.$mountVue.prototype.$mount = function ()&#123;&#125;\n至于，被覆盖的$mount在哪里定义的，通过目前我们看到的代码，暂且不得而知；与此同时，在该文件中，并没有看到Vue构造函数的声明，Vue 是从其它文件导入的，可以猜测在这里获取到的Vue已经被挂载了一系列的实例方法和静态方法，直接去分析$mount以及为什么被覆盖重写显然是不对的，因为并不知道之前Vue已经被做了哪些操作。\n我们在使用的Vue框架的时候，都是从new Vue()开始,所以我们尝试着先找到Vue构造函数声明的地方，从Vue声明的文件往Rollup打包的入口文件进行分析。\n查找Vue构造函数在文件的顶部看到：\n1import Vue from './runtime/index'\n继续打开runtime/index.js1import Vue from 'core/index'\nps:前面提到过core为alias下定义的别名，等同于：resolve(&#39;src/core&#39;)\n继续打开core/index.js1import Vue from './instance/index'\n继续打开./instance/index\n最终，终于在src/core/instance/index.js中找到了Vue构造函数的声明，如下：12345678910111213//Vue框架的起点，从package.json文件一路追寻到这里，使用Vue框架也是从 new Vue()开始function Vue (options) &#123;  //判断当前环境，非生产环境下，需要判断当前实例是否是Vue构造的实例，  //也就是通过new Vue()生成的，如果不是，直接提示：  //Vue is a constructor and should be called with the `new` keyword  if (process.env.NODE_ENV !== 'production' &amp;&amp;    !(this instanceof Vue)  ) &#123;    warn('Vue is a constructor and should be called with the `new` keyword')  &#125;  //这是Vue实例调用的第一个方法，该实例方法在initMixin方法挂载；  this._init(options)&#125;\n在该文件下，执行了initMixin,stateMixin,eventsMixin,lifecycleMixin,renderMixin五个方法，对Vue构造函数进行了包装，再将包装过后的构造函数进行导出，接下来，我们深入到每一个方法，看看在每一个方法中对Vue构造函数挂载了哪些东西。\n考虑到挂载的方法较多，文件导入导出也相对的频繁，为了更加理清楚各个文件之间的关系，我们将每个文件及该文件挂载了哪些方法及属性以流程图的方式进行描述。\ninitMixin1import &#123; initMixin &#125; from './init'\ninitMixin方法从init.js文件中导入，initMixin主要为Vue挂载了_init方法，该方法也是实例化Vue的时候执行的唯一的实例方法。在分析Vue初始化的时候，我们会从这里开始，逐步深入理解Vue初始化的整个过程，在目前这个阶段，不会过多的关注_init内部的实现细节。\nstateMixin1import &#123; stateMixin &#125; from './state'\nstateMixin方法位于state.js文件中，方法开始定义了两个对象dataDef和propsDef，如下：1234567891011121314151617181920const dataDef = &#123;&#125;dataDef.get = function () &#123; return this._data &#125;const propsDef = &#123;&#125;propsDef.get = function () &#123; return this._props &#125;if (process.env.NODE_ENV !== 'production') &#123;  dataDef.set = function (newData: Object) &#123;    warn(      'Avoid replacing instance root $data. ' +      'Use nested data properties instead.',      this    )  &#125;  propsDef.set = function () &#123;    warn(`$props is readonly.`, this)  &#125;&#125;//代理this._data 为 this.$data Object.defineProperty(Vue.prototype, '$data', dataDef)//代理this._props 为 this.$props Object.defineProperty(Vue.prototype, '$props', propsDef)\n通过Object.defineProperty为Vue构造函数定义了两个实例属性$data和$props，他们分别等于dataDef和propsDef，通过拦截set来判断在非生产环境下，禁止对$data和$props直接进行覆盖赋值，并对其作出提示，以此来保证$data和$props是只读的。当对this.$data和this.$props访问时，会代理访问到this._data和this._props。\n之后挂载了两个实例方法$set和$delete，这两个api的作用是用来添加/删除字段。\n12Vue.prototype.$set = setVue.prototype.$delete = del\n最后，挂载了$watch实例方法：1234567  Vue.prototype.$watch = function (    expOrFn: string | Function,    cb: any,    options?: Object  ): Function &#123;  \t....&#125;\n所以，在stateMixin中，共挂载了$data,$props,$set,$delete,$watch五个实例属性或方法，我们把他们放进流程图中。\neventsMixin1import &#123; eventsMixin &#125; from './events'\neventsMixin方法主要为Vue添加了四个实例方法，分别为：$on,$once,$off,$emit,这四个方法都是对事件绑定/监听/取消的处理，在官方文档有对其使用的描述，这里暂不做详细的原理分析，我们的目的是，先从宏观上对Vue框架有一个了解，再逐步分析其细节。官方文档描述地址：点击这里\nlifecycleMixin1import &#123; lifecycleMixin &#125; from './lifecycle'\nlifecycleMixin挂载了三个实例方法，分别为：_update,$forceUpdate,$destroy。\nrenderMixin1import &#123; renderMixin &#125; from './render'\nrenderMixin方法第一行首先以Vue的原型作为参数调用了installRenderHelpers方法，在installRenderHelpers内部绑定了一系列的方法，如下:123456789101112131415Vue.prototype._o = markOnceVue.prototype._n = toNumberVue.prototype._s = toStringVue.prototype._l = renderListVue.prototype._t = renderSlotVue.prototype._q = looseEqualVue.prototype._i = looseIndexOfVue.prototype._m = renderStaticVue.prototype._f = resolveFilterVue.prototype._k = checkKeyCodesVue.prototype._b = bindObjectPropsVue.prototype._v = createTextVNodeVue.prototype._e = createEmptyVNodeVue.prototype._u = resolveScopedSlotsVue.prototype._g = bindObjectListeners\n之后，又绑定了$nextTick和_render实例方法。\n全局API的挂载上一小节，在Vue构造函数声明之后，通过initMixin,stateMixin,eventsMixin,lifecycleMixin,renderMixin五个方法对其挂载了一系列的实例方法，之后Vue被导出到core/index.js中，在这里会进行对其进一步静态属性、全局方法及服务端渲染相关的配置项的挂载。\ninitGlobalAPIinitGlobalAPI方法是core/index.js文件中首先执行的方法，它接收上一小节已挂载好部分实例方法的Vue构造函数作为参数，在initGlobalAPI内部，我们首先看到如下的代码段：12345678910111213// configconst configDef = &#123;&#125;configDef.get = () =&gt; config//非生产环境下，config为只读状态if (process.env.NODE_ENV !== 'production') &#123;  configDef.set = () =&gt; &#123;    warn(      'Do not replace the Vue.config object, set individual fields instead.'    )  &#125;&#125;//在Vue构造方法上挂载configObject.defineProperty(Vue, 'config', configDef)\n以上为Vue构造函数挂载了一个名为config的静态属性，它的值同stateMixin里的$data和$props一样，通过相同的写法设置了一个只读的属性值，他的值是从外部导入的一个对象，同样，我们将其先罗列在下面，暂不究其到底是做什么的，等后面用到的时候再逐一进行分析。1234567891011121314151617181920212223Vue.config = &#123;  // user  optionMergeStrategies: &#123; [key: string]: Function &#125;;  silent: boolean;  productionTip: boolean;  performance: boolean;  devtools: boolean;  errorHandler: ?(err: Error, vm: Component, info: string) =&gt; void;  warnHandler: ?(msg: string, vm: Component, trace: string) =&gt; void;  ignoredElements: Array&lt;string | RegExp&gt;;  keyCodes: &#123; [key: string]: number | Array&lt;number&gt; &#125;;  // platform  isReservedTag: (x?: string) =&gt; boolean;  isReservedAttr: (x?: string) =&gt; boolean;  parsePlatformTagName: (x: string) =&gt; string;  isUnknownElement: (x?: string) =&gt; boolean;  getTagNamespace: (x?: string) =&gt; string | void;  mustUseProp: (tag: string, type: ?string, name: string) =&gt; boolean;  // legacy  _lifecycleHooks: Array&lt;string&gt;;&#125;\n紧接着，又为Vue挂载了一个util对象，对象内部包含四个方法：warn,extend,mergeOptions,defineReactive：123456Vue.util = &#123;  warn,  extend,  mergeOptions,  defineReactive&#125;\n之后，挂载set,delete,nextTick,其中delete和nextTick在之前的stateMixin中已经被挂载过一次，不同的是之前是挂载到实例上，这次是作为一个静态方法挂载。123Vue.set = setVue.delete = delVue.nextTick = nextTick\n然后，又为Vue挂载了一个options静态属性，它的初始值是一个通过Object.create(null)创建的空对象。之后便通过遍历ASSET_TYPES将components,directives,filters作为options对象的key追加进去，最后又将当前的Vue构造函数以key为_base追加到options中，如下：123456Vue.options = &#123;  components:&#123;&#125;,  directives:&#123;&#125;,  filters:&#123;&#125;,  _base:Vue&#125;\n下面一行代码：1extend(Vue.options.components, builtInComponents)\nextend方法详见shared目录下，简单讲就是copy一个对象到另一个对象上，将两个对象进行合并。这里是将builtInComponents合并到Vue.options.components上，因为当前 builtInComponents 仅仅代表的是内置组件keep-live，所以合并完之后应该是下面的样子：12345678Vue.options = &#123;  components:&#123;    KeepAlive  &#125;,  directives:&#123;&#125;,  filters:&#123;&#125;,  _base:Vue&#125;\n最后，执行了initUse,initMixin,initExtend,initAssetRegisters：\ninitUse挂载全局的Vue.use静态方法，该方法用于安装 Vue.js 插件，官方文档地址：点击进入。\ninitMixin挂载全局的Vue.mixin静态方法，官方文档地址：点击进入\ninitExtend挂载全局的Vue.extend静态方法，用于扩展组件选项，官方文档地址：点击进入\ninitAssetRegisters再次遍历ASSET_TYPES，挂载全局方法component,directive,filter：123Vue.component = function()&#123;&#125;Vue.directive = function()&#123;&#125;Vue.filter = function()&#123;&#125;\n","dateCreated":"2018-06-12T15:02:33+08:00","dateModified":"2018-08-07T20:59:51+08:00","datePublished":"2018-06-12T15:02:33+08:00","description":"查找入口随着近几年前端工程化、自动化构建的兴起，越来越多的前端项目开始依赖于一种或多种构建工具协助开发和打包，每当从Github上download下一份项目代码，习惯性的先打开根目录下的package.json文件，里面的描述信息包含了入口文件、项目说明、第三方依赖、script执行脚本等等关键信息，通过这里也可以了解该项目的第一手信息。\n在Vue源码的解析的最开始，我们继续延用之前的方式，先从package.json文件开始，以这里作为起点，沿着一条主线，看一看Vue构造函数是如何产生的。","headline":"Vue 2.5.9 源码分析（一） ~ 从构造函数开始","image":[],"mainEntityOfPage":{"@type":"WebPage","@id":"http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/"},"publisher":{"@type":"Organization","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg","logo":{"@type":"ImageObject","url":"pic.jpg"}},"url":"http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/","keywords":"源码分析, Vue"}</script>
+    <meta name="description" content="查找入口随着近几年前端工程化、自动化构建的兴起，越来越多的前端项目开始依赖于一种或多种构建工具协助开发和打包，每当从Github上download下一份项目代码，习惯性的先打开根目录下的package.json文件，里面的描述信息包含了入口文件、项目说明、第三方依赖、script执行脚本等等关键信息，通过这里也可以了解该项目的第一手信息。 在Vue源码的解析的最开始，我们继续延用之前的方式，先从p">
+<meta name="keywords" content="源码分析,Vue">
+<meta property="og:type" content="blog">
+<meta property="og:title" content="Vue 2.5.9 源码分析（一） ~ 从构造函数开始">
+<meta property="og:url" content="http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/index.html">
+<meta property="og:site_name" content="Mengyu&#39;s Notes">
+<meta property="og:description" content="查找入口随着近几年前端工程化、自动化构建的兴起，越来越多的前端项目开始依赖于一种或多种构建工具协助开发和打包，每当从Github上download下一份项目代码，习惯性的先打开根目录下的package.json文件，里面的描述信息包含了入口文件、项目说明、第三方依赖、script执行脚本等等关键信息，通过这里也可以了解该项目的第一手信息。 在Vue源码的解析的最开始，我们继续延用之前的方式，先从p">
+<meta property="og:locale" content="zh-Hans">
+<meta property="og:image" content="http://mife.io/images/2018/8/vue-1/initMixin.png">
+<meta property="og:image" content="http://mife.io/images/2018/8/vue-1/stateMixin.png">
+<meta property="og:image" content="http://mife.io/images/2018/8/vue-1/eventsMixin.png">
+<meta property="og:image" content="http://mife.io/images/2018/8/vue-1/lifecycleMixin.png">
+<meta property="og:image" content="http://mife.io/images/2018/8/vue-1/renderMixin.png">
+<meta property="og:updated_time" content="2018-08-07T12:59:51.499Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Vue 2.5.9 源码分析（一） ~ 从构造函数开始">
+<meta name="twitter:description" content="查找入口随着近几年前端工程化、自动化构建的兴起，越来越多的前端项目开始依赖于一种或多种构建工具协助开发和打包，每当从Github上download下一份项目代码，习惯性的先打开根目录下的package.json文件，里面的描述信息包含了入口文件、项目说明、第三方依赖、script执行脚本等等关键信息，通过这里也可以了解该项目的第一手信息。 在Vue源码的解析的最开始，我们继续延用之前的方式，先从p">
+<meta name="twitter:image" content="http://mife.io/images/2018/8/vue-1/initMixin.png">
+    
+    
+        
+    
+    
+        <meta property="og:image" content="http://mife.io/assets/images/pic.jpg"/>
+    
+    
+    
+    
+    <!--STYLES-->
+    <link rel="stylesheet" href="/assets/css/style-1udptkpril81ozu8ifd8zpujn7ipu7lefxsiu5gxx0dpnzntdx6dusvki3ao.min.css">
+    <!--STYLES END-->
+    
+
+    
+    <script type="text/javascript">
+    var _hmt = _hmt || [];
+    (function() {
+      var hm = document.createElement("script");
+      hm.src = "//hm.baidu.com/hm.js?3689bb8a19409b583596dd91730d27d6";
+      var s = document.getElementsByTagName("script")[0];
+      s.parentNode.insertBefore(hm, s);
+    })();
+    </script>
+
+</head>
+
+    <body>
+        <div id="blog">
+            <!-- Define author's picture -->
+
+
+    
+        
+            
+        
+    
+
+<header id="header" data-behavior="5">
+    <i id="btn-open-sidebar" class="fa fa-lg fa-bars"></i>
+    <div class="header-title">
+        <a class="header-title-link" href="/ ">Mengyu&#39;s Notes</a>
+    </div>
+    
+        
+            <a  class="header-right-picture "
+                href="#about">
+        
+        
+            <img class="header-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+        
+        </a>
+    
+</header>
+
+            <!-- Define author's picture -->
+
+
+
+        
+    
+
+<nav id="sidebar" data-behavior="5">
+    <div class="sidebar-container">
+        
+            <div class="sidebar-profile">
+                <a href="/#about">
+                    <img class="sidebar-profile-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+                </a>
+                <h4 class="sidebar-profile-name">Mengyu&#39;s Notes</h4>
+                
+                    <h5 class="sidebar-profile-bio"><p>一身情怀，两手空空</p>
+</h5>
+                
+            </div>
+        
+        
+            <ul class="sidebar-buttons">
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/ "
+                            
+                            title="Home"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-home" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Home</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-archives"
+                            
+                            title="Archives"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-archive" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Archives</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-categories"
+                            
+                            title="Categories"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-bookmark" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Categories</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="/all-tags"
+                            
+                            title="Tags"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-tags" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Tags</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link "
+                             href="#about"
+                            
+                            title="About"
+                        >
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-user" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">About</span>
+                    </a>
+            </li>
+            
+        </ul>
+        
+            <ul class="sidebar-buttons">
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link " href="https://github.com/daqd" target="_blank" rel="noopener" title="GitHub">
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-github" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">GitHub</span>
+                    </a>
+            </li>
+            
+                <li class="sidebar-button">
+                    
+                        <a  class="sidebar-button-link " href="mailto:hellojser@gmail.com" target="_blank" rel="noopener" title="Mail">
+                    
+                        <i class="sidebar-button-icon fa fa-lg fa-envelope-o" aria-hidden="true"></i>
+                        <span class="sidebar-button-desc">Mail</span>
+                    </a>
+            </li>
+            
+        </ul>
+        
+    </div>
+</nav>
+
+            
+            <div id="main" data-behavior="5"
+                 class="
+                        hasCoverMetaIn
+                        ">
+                
+<article class="post">
+    
+    
+        <div class="post-header main-content-wrap text-left">
+    
+        <h1 class="post-title">
+            Vue 2.5.9 源码分析（一） ~ 从构造函数开始
+        </h1>
+    
+    
+        <div class="post-meta">
+    <time datetime="2018-06-12T15:02:33+08:00">
+	
+		    Jun 12, 2018
+    	
+    </time>
+    
+</div>
+
+    
+</div>
+
+    
+    <div class="post-content markdown">
+        <div class="main-content-wrap">
+            <h2 id="查找入口"><a href="#查找入口" class="headerlink" title="查找入口"></a>查找入口</h2><p>随着近几年前端工程化、自动化构建的兴起，越来越多的前端项目开始依赖于一种或多种构建工具协助开发和打包，每当从Github上download下一份项目代码，习惯性的先打开根目录下的<code>package.json</code>文件，里面的描述信息包含了入口文件、项目说明、第三方依赖、script执行脚本等等关键信息，通过这里也可以了解该项目的第一手信息。</p>
+<p>在Vue源码的解析的最开始，我们继续延用之前的方式，先从<code>package.json</code>文件开始，以这里作为起点，沿着一条主线，看一看Vue构造函数是如何产生的。<br><a id="more"></a></p>
+<h3 id="package-json"><a href="#package-json" class="headerlink" title="package.json"></a>package.json</h3><p>打开<code>package.json</code>文件，可以看到如下script执行脚本：</p>
+<figure class="highlight clean"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="string">"scripts"</span>: &#123;</span><br><span class="line">  <span class="string">"dev"</span>: <span class="string">"rollup -w -c build/config.js --environment TARGET:web-full-dev"</span>,</span><br><span class="line">  <span class="string">"dev:cjs"</span>: <span class="string">"rollup -w -c build/config.js --environment TARGET:web-runtime-cjs"</span>,</span><br><span class="line">  <span class="string">"dev:esm"</span>: <span class="string">"rollup -w -c build/config.js --environment TARGET:web-runtime-esm"</span>,</span><br><span class="line">  ...</span><br><span class="line"> &#125;</span><br></pre></td></tr></table></figure>
+<p>从上面可以看出，Vue使用了 <a href="https://www.rollupjs.com/guide/en" target="_blank" rel="noopener">rollup.js</a> 构建工具来构建整个项目，rollup构建的配置信息在build/config.js文件中，通过TARGET参数来提取不同的配置信息，如下：</p>
+<figure class="highlight vim"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><span class="line">const builds = &#123;</span><br><span class="line">  ...,</span><br><span class="line">  <span class="string">'web-full-cjs'</span>: &#123;</span><br><span class="line">    entry: <span class="built_in">resolve</span>(<span class="string">'web/entry-runtime-with-compiler.js'</span>),</span><br><span class="line">    des<span class="variable">t:</span> <span class="built_in">resolve</span>(<span class="string">'dist/vue.common.js'</span>),</span><br><span class="line">    forma<span class="variable">t:</span> <span class="string">'cjs'</span>,</span><br><span class="line">    alia<span class="variable">s:</span> &#123; he: <span class="string">'./entity-decoder'</span> &#125;,</span><br><span class="line">    banner</span><br><span class="line">  &#125;,</span><br><span class="line">  ....,</span><br><span class="line">  <span class="string">'web-full-dev'</span>: &#123;</span><br><span class="line">    entry: <span class="built_in">resolve</span>(<span class="string">'web/entry-runtime-with-compiler.js'</span>),</span><br><span class="line">    des<span class="variable">t:</span> <span class="built_in">resolve</span>(<span class="string">'dist/vue.js'</span>),</span><br><span class="line">    forma<span class="variable">t:</span> <span class="string">'umd'</span>,</span><br><span class="line">    <span class="keyword">en</span><span class="variable">v:</span> <span class="string">'development'</span>,</span><br><span class="line">    alia<span class="variable">s:</span> &#123; he: <span class="string">'./entity-decoder'</span> &#125;,</span><br><span class="line">    banner</span><br><span class="line">  &#125;,</span><br><span class="line">  ....</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">function</span> <span class="title">genConfig</span> <span class="params">(name)</span> &#123;</span></span><br><span class="line">  const opts = builds[name]</span><br><span class="line">  const config = &#123;</span><br><span class="line">    inpu<span class="variable">t:</span> opts.entry,</span><br><span class="line">    externa<span class="variable">l:</span> opts.external,</span><br><span class="line">    plugin<span class="variable">s:</span> [...],</span><br><span class="line">    outpu<span class="variable">t:</span> &#123;...&#125;</span><br><span class="line">  &#125;</span><br><span class="line">  ...</span><br><span class="line"></span><br><span class="line">  <span class="keyword">return</span> config</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> (process.env.TARGET) &#123;</span><br><span class="line">  module.exports = genConfig(process.env.TARGET)</span><br><span class="line">&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">	...</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>以上为删减后的代码，重点保留了rollup的构建配置参数，config.js文件最终导出的是<code>genConfig</code>的返回值，<code>genConfig</code>函数接收TARGET作为参数，从builds对象中提取对应的配置信息，在<code>genConfig</code>内部转换成rollup可以识别的配置参数，在这里，我们重点需要关注的是其中的input参数，它是rollup构建的入口文件，类似于Webpack的entry。</p>
+<p>从配置信息可以发现，TARGET为<code>web-full-cjs</code>和<code>web-full-dev</code>的区别只在于format的值不同，这里正是为了打包出不同格式的模块，如：AMD 、 UMD 、commonJS，其中默认打包<code>umd</code>格式。</p>
+<h3 id="alias"><a href="#alias" class="headerlink" title="alias"></a>alias</h3><p>当前我们已经找到了input就是rollup构建的入口，可是我们发现input的值为：<code>resolve(&#39;web/entry-runtime-with-compiler.js&#39;)</code>，那么，web是指的哪里呢？</p>
+<p>webpack和rollup这些构建工具都提供了alias的配置项，目的是在项目的不同层级目录中更方便的调用某个文件，在之前的<code>genConfig</code>方法中，为了突出重点，省略了alias的配置，省略的部分如下：</p>
+<figure class="highlight qml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">const</span> aliases = <span class="built_in">require</span>(<span class="string">'./alias'</span>);</span><br><span class="line"><span class="function"><span class="keyword">function</span> <span class="title">genConfig</span> (<span class="params">name</span>) </span>&#123;</span><br><span class="line">  <span class="keyword">const</span> opts = builds[name]</span><br><span class="line">  <span class="keyword">const</span> config = &#123;</span><br><span class="line">  	...</span><br><span class="line">    <span class="attribute">plugins</span>: [</span><br><span class="line">      ...</span><br><span class="line">      alias(<span class="built_in">Object</span>.assign(&#123;&#125;, aliases, opts.alias))</span><br><span class="line">    ].concat(opts.plugins || []),</span><br><span class="line">    ...</span><br><span class="line">  &#125;</span><br><span class="line">  ...</span><br><span class="line"></span><br><span class="line">  <span class="keyword">return</span> config</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>alias.js的内容如下：</p>
+<figure class="highlight vim"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">module.exports = &#123;</span><br><span class="line">  vue: <span class="built_in">resolve</span>(<span class="string">'src/platforms/web/entry-runtime-with-compiler'</span>),</span><br><span class="line">  <span class="keyword">compiler</span>: <span class="built_in">resolve</span>(<span class="string">'src/compiler'</span>),</span><br><span class="line">  core: <span class="built_in">resolve</span>(<span class="string">'src/core'</span>),</span><br><span class="line">  shared: <span class="built_in">resolve</span>(<span class="string">'src/shared'</span>),</span><br><span class="line">  we<span class="variable">b:</span> <span class="built_in">resolve</span>(<span class="string">'src/platforms/web'</span>),</span><br><span class="line">  weex: <span class="built_in">resolve</span>(<span class="string">'src/platforms/weex'</span>),</span><br><span class="line">  server: <span class="built_in">resolve</span>(<span class="string">'src/server'</span>),</span><br><span class="line">  entrie<span class="variable">s:</span> <span class="built_in">resolve</span>(<span class="string">'src/entries'</span>),</span><br><span class="line">  sfc: <span class="built_in">resolve</span>(<span class="string">'src/sfc'</span>)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>除了web，alias.js还配置了其它常用到的目录别名，在后面的源码阅读过程中也会用到。</p>
+<h2 id="从构造函数开始"><a href="#从构造函数开始" class="headerlink" title="从构造函数开始"></a>从构造函数开始</h2><p>在上一小节，我们已经找到了rollup打包构建的入口文件，那就是别名为web的entry-runtime-with-compiler.js，在该文件中，为Vue构造方法挂载了一个<code>compile</code>的静态方法；并且，从下面的代码可以看出：覆盖掉了之前定义的$mount方法。<br><figure class="highlight elm"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="title">const</span> mount = <span class="type">Vue</span>.proto<span class="keyword">type</span>.$mount</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>.$mount = function ()&#123;&#125;</span><br></pre></td></tr></table></figure></p>
+<p>至于，被覆盖的$mount在哪里定义的，通过目前我们看到的代码，暂且不得而知；与此同时，在该文件中，并没有看到Vue构造函数的声明，Vue 是从其它文件导入的，可以猜测在这里获取到的Vue已经被挂载了一系列的实例方法和静态方法，直接去分析$mount以及为什么被覆盖重写显然是不对的，因为并不知道之前Vue已经被做了哪些操作。</p>
+<p>我们在使用的Vue框架的时候，都是从<code>new Vue()</code>开始,所以我们尝试着先找到Vue构造函数声明的地方，从Vue声明的文件往Rollup打包的入口文件进行分析。</p>
+<h4 id="查找Vue构造函数"><a href="#查找Vue构造函数" class="headerlink" title="查找Vue构造函数"></a>查找Vue构造函数</h4><p>在文件的顶部看到：</p>
+<figure class="highlight clean"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> Vue <span class="keyword">from</span> <span class="string">'./runtime/index'</span></span><br></pre></td></tr></table></figure>
+<p>继续打开runtime/index.js<br><figure class="highlight clean"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> Vue <span class="keyword">from</span> <span class="string">'core/index'</span></span><br></pre></td></tr></table></figure></p>
+<p>ps:前面提到过core为alias下定义的别名，等同于：<code>resolve(&#39;src/core&#39;)</code></p>
+<p>继续打开core/index.js<br><figure class="highlight clean"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> Vue <span class="keyword">from</span> <span class="string">'./instance/index'</span></span><br></pre></td></tr></table></figure></p>
+<p>继续打开./instance/index</p>
+<p>最终，终于在src/core/instance/index.js中找到了Vue构造函数的声明，如下：<br><figure class="highlight actionscript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//Vue框架的起点，从package.json文件一路追寻到这里，使用Vue框架也是从 new Vue()开始</span></span><br><span class="line"><span class="function"><span class="keyword">function</span> <span class="title">Vue</span> <span class="params">(options)</span> </span>&#123;</span><br><span class="line">  <span class="comment">//判断当前环境，非生产环境下，需要判断当前实例是否是Vue构造的实例，</span></span><br><span class="line">  <span class="comment">//也就是通过new Vue()生成的，如果不是，直接提示：</span></span><br><span class="line">  <span class="comment">//Vue is a constructor and should be called with the `new` keyword</span></span><br><span class="line">  <span class="keyword">if</span> (process.env.NODE_ENV !== <span class="string">'production'</span> &amp;&amp;</span><br><span class="line">    !(<span class="keyword">this</span> <span class="keyword">instanceof</span> Vue)</span><br><span class="line">  ) &#123;</span><br><span class="line">    warn(<span class="string">'Vue is a constructor and should be called with the `new` keyword'</span>)</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="comment">//这是Vue实例调用的第一个方法，该实例方法在initMixin方法挂载；</span></span><br><span class="line">  <span class="keyword">this</span>._init(options)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>在该文件下，执行了<code>initMixin</code>,<code>stateMixin</code>,<code>eventsMixin</code>,<code>lifecycleMixin</code>,<code>renderMixin</code>五个方法，对Vue构造函数进行了包装，再将包装过后的构造函数进行导出，接下来，我们深入到每一个方法，看看在每一个方法中对Vue构造函数挂载了哪些东西。</p>
+<p>考虑到挂载的方法较多，文件导入导出也相对的频繁，为了更加理清楚各个文件之间的关系，我们将每个文件及该文件挂载了哪些方法及属性以流程图的方式进行描述。</p>
+<h4 id="initMixin"><a href="#initMixin" class="headerlink" title="initMixin"></a>initMixin</h4><figure class="highlight clean"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> &#123; initMixin &#125; <span class="keyword">from</span> <span class="string">'./init'</span></span><br></pre></td></tr></table></figure>
+<p>initMixin方法从init.js文件中导入，initMixin主要为Vue挂载了<code>_init</code>方法，该方法也是实例化Vue的时候执行的唯一的实例方法。在分析Vue初始化的时候，我们会从这里开始，逐步深入理解Vue初始化的整个过程，在目前这个阶段，不会过多的关注<code>_init</code>内部的实现细节。<br><img src="/images/2018/8/vue-1/initMixin.png" alt="initMixin"></p>
+<h4 id="stateMixin"><a href="#stateMixin" class="headerlink" title="stateMixin"></a>stateMixin</h4><figure class="highlight pf"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">import &#123; <span class="keyword">state</span>Mixin &#125; <span class="keyword">from</span> './<span class="keyword">state</span>'</span><br></pre></td></tr></table></figure>
+<p>stateMixin方法位于state.js文件中，方法开始定义了两个对象<code>dataDef</code>和<code>propsDef</code>，如下：<br><figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">const</span> dataDef = &#123;&#125;</span><br><span class="line">dataDef.get = <span class="function"><span class="keyword">function</span> (<span class="params"></span>) </span>&#123; <span class="keyword">return</span> <span class="keyword">this</span>._data &#125;</span><br><span class="line"><span class="keyword">const</span> propsDef = &#123;&#125;</span><br><span class="line">propsDef.get = <span class="function"><span class="keyword">function</span> (<span class="params"></span>) </span>&#123; <span class="keyword">return</span> <span class="keyword">this</span>._props &#125;</span><br><span class="line"><span class="keyword">if</span> (process.env.NODE_ENV !== <span class="string">'production'</span>) &#123;</span><br><span class="line">  dataDef.set = <span class="function"><span class="keyword">function</span> (<span class="params">newData: Object</span>) </span>&#123;</span><br><span class="line">    warn(</span><br><span class="line">      <span class="string">'Avoid replacing instance root $data. '</span> +</span><br><span class="line">      <span class="string">'Use nested data properties instead.'</span>,</span><br><span class="line">      <span class="keyword">this</span></span><br><span class="line">    )</span><br><span class="line">  &#125;</span><br><span class="line">  propsDef.set = <span class="function"><span class="keyword">function</span> (<span class="params"></span>) </span>&#123;</span><br><span class="line">    warn(<span class="string">`$props is readonly.`</span>, <span class="keyword">this</span>)</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="comment">//代理this._data 为 this.$data </span></span><br><span class="line"><span class="built_in">Object</span>.defineProperty(Vue.prototype, <span class="string">'$data'</span>, dataDef)</span><br><span class="line"><span class="comment">//代理this._props 为 this.$props </span></span><br><span class="line"><span class="built_in">Object</span>.defineProperty(Vue.prototype, <span class="string">'$props'</span>, propsDef)</span><br></pre></td></tr></table></figure></p>
+<p>通过Object.defineProperty为Vue构造函数定义了两个实例属性$data和$props，他们分别等于dataDef和propsDef，通过拦截set来判断在非生产环境下，禁止对$data和$props直接进行覆盖赋值，并对其作出提示，以此来保证$data和$props是只读的。当对this.$data和this.$props访问时，会代理访问到this._data和this._props。</p>
+<p>之后挂载了两个实例方法$set和$delete，这两个api的作用是用来添加/删除字段。</p>
+<figure class="highlight stylus"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Vue<span class="selector-class">.prototype</span>.<span class="variable">$set</span> = set</span><br><span class="line">Vue<span class="selector-class">.prototype</span>.<span class="variable">$delete</span> = del</span><br></pre></td></tr></table></figure>
+<p>最后，挂载了$watch实例方法：<br><figure class="highlight fortran"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">  Vue.prototype.$watch = <span class="function"><span class="keyword">function</span></span> (</span><br><span class="line">    expOrFn: string | <span class="function"><span class="keyword">Function</span></span>,</span><br><span class="line">    cb: <span class="built_in">any</span>,</span><br><span class="line">    options?: Object</span><br><span class="line">  ): <span class="function"><span class="keyword">Function</span></span> &#123;</span><br><span class="line">  	....</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>所以，在stateMixin中，共挂载了<code>$data</code>,<code>$props</code>,<code>$set</code>,<code>$delete</code>,<code>$watch</code>五个实例属性或方法，我们把他们放进流程图中。<br><img src="/images/2018/8/vue-1/stateMixin.png" alt="stateMixin"></p>
+<h4 id="eventsMixin"><a href="#eventsMixin" class="headerlink" title="eventsMixin"></a>eventsMixin</h4><figure class="highlight clean"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> &#123; eventsMixin &#125; <span class="keyword">from</span> <span class="string">'./events'</span></span><br></pre></td></tr></table></figure>
+<p><code>eventsMixin</code>方法主要为Vue添加了四个实例方法，分别为：<code>$on</code>,<code>$once</code>,<code>$off</code>,<code>$emit</code>,这四个方法都是对事件绑定/监听/取消的处理，在官方文档有对其使用的描述，这里暂不做详细的原理分析，我们的目的是，先从宏观上对Vue框架有一个了解，再逐步分析其细节。官方文档描述地址：<a href="https://cn.vuejs.org/v2/api/#vm-on" target="_blank" rel="noopener">点击这里</a><br><img src="/images/2018/8/vue-1/eventsMixin.png" alt="eventsMixin"></p>
+<h4 id="lifecycleMixin"><a href="#lifecycleMixin" class="headerlink" title="lifecycleMixin"></a>lifecycleMixin</h4><figure class="highlight clean"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> &#123; lifecycleMixin &#125; <span class="keyword">from</span> <span class="string">'./lifecycle'</span></span><br></pre></td></tr></table></figure>
+<p><code>lifecycleMixin</code>挂载了三个实例方法，分别为：<code>_update</code>,<code>$forceUpdate</code>,<code>$destroy</code>。<br><img src="/images/2018/8/vue-1/lifecycleMixin.png" alt="lifecycleMixin"></p>
+<h4 id="renderMixin"><a href="#renderMixin" class="headerlink" title="renderMixin"></a>renderMixin</h4><figure class="highlight clean"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> &#123; renderMixin &#125; <span class="keyword">from</span> <span class="string">'./render'</span></span><br></pre></td></tr></table></figure>
+<p><code>renderMixin</code>方法第一行首先以Vue的原型作为参数调用了<code>installRenderHelpers</code>方法，在<code>installRenderHelpers</code>内部绑定了一系列的方法，如下:<br><figure class="highlight elm"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._o = markOnce</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._n = toNumber</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._s = toString</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._l = renderList</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._t = renderSlot</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._q = looseEqual</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._i = looseIndexOf</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._m = renderStatic</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._f = resolveFilter</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._k = checkKeyCodes</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._b = bindObjectProps</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._v = createTextVNode</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._e = createEmptyVNode</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._u = resolveScopedSlots</span><br><span class="line"><span class="type">Vue</span>.proto<span class="keyword">type</span>._g = bindObjectListeners</span><br></pre></td></tr></table></figure></p>
+<p>之后，又绑定了<code>$nextTick</code>和<code>_render</code>实例方法。<br><img src="/images/2018/8/vue-1/renderMixin.png" alt="renderMixin"></p>
+<h2 id="全局API的挂载"><a href="#全局API的挂载" class="headerlink" title="全局API的挂载"></a>全局API的挂载</h2><p>上一小节，在Vue构造函数声明之后，通过<code>initMixin</code>,<code>stateMixin</code>,<code>eventsMixin</code>,<code>lifecycleMixin</code>,<code>renderMixin</code>五个方法对其挂载了一系列的实例方法，之后Vue被导出到<code>core/index.js</code>中，在这里会进行对其进一步静态属性、全局方法及服务端渲染相关的配置项的挂载。</p>
+<h4 id="initGlobalAPI"><a href="#initGlobalAPI" class="headerlink" title="initGlobalAPI"></a>initGlobalAPI</h4><p><code>initGlobalAPI</code>方法是<code>core/index.js</code>文件中首先执行的方法，它接收上一小节已挂载好部分实例方法的Vue构造函数作为参数，在<code>initGlobalAPI</code>内部，我们首先看到如下的代码段：<br><figure class="highlight stylus"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// config</span></span><br><span class="line">const configDef = &#123;&#125;</span><br><span class="line">configDef<span class="selector-class">.get</span> = () =&gt; config</span><br><span class="line"><span class="comment">//非生产环境下，config为只读状态</span></span><br><span class="line"><span class="keyword">if</span> (process<span class="selector-class">.env</span><span class="selector-class">.NODE_ENV</span> !== <span class="string">'production'</span>) &#123;</span><br><span class="line">  configDef<span class="selector-class">.set</span> = () =&gt; &#123;</span><br><span class="line">    warn(</span><br><span class="line">      <span class="string">'Do not replace the Vue.config object, set individual fields instead.'</span></span><br><span class="line">    )</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="comment">//在Vue构造方法上挂载config</span></span><br><span class="line">Object.defineProperty(Vue, <span class="string">'config'</span>, configDef)</span><br></pre></td></tr></table></figure></p>
+<p>以上为Vue构造函数挂载了一个名为config的静态属性，它的值同<code>stateMixin</code>里的$data和$props一样，通过相同的写法设置了一个只读的属性值，他的值是从外部导入的一个对象，同样，我们将其先罗列在下面，暂不究其到底是做什么的，等后面用到的时候再逐一进行分析。<br><figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line">Vue.config = &#123;</span><br><span class="line">  <span class="comment">// user</span></span><br><span class="line">  optionMergeStrategies: &#123; [key: <span class="built_in">string</span>]: <span class="built_in">Function</span> &#125;;</span><br><span class="line">  silent: <span class="built_in">boolean</span>;</span><br><span class="line">  productionTip: <span class="built_in">boolean</span>;</span><br><span class="line">  performance: <span class="built_in">boolean</span>;</span><br><span class="line">  devtools: <span class="built_in">boolean</span>;</span><br><span class="line">  errorHandler: ?<span class="function">(<span class="params">err: <span class="built_in">Error</span>, vm: Component, info: <span class="built_in">string</span></span>) =&gt;</span> <span class="built_in">void</span>;</span><br><span class="line">  warnHandler: ?<span class="function">(<span class="params">msg: <span class="built_in">string</span>, vm: Component, trace: <span class="built_in">string</span></span>) =&gt;</span> <span class="built_in">void</span>;</span><br><span class="line">  ignoredElements: <span class="built_in">Array</span>&lt;<span class="built_in">string</span> | <span class="built_in">RegExp</span>&gt;;</span><br><span class="line">  keyCodes: &#123; [key: <span class="built_in">string</span>]: <span class="built_in">number</span> | <span class="built_in">Array</span>&lt;<span class="built_in">number</span>&gt; &#125;;</span><br><span class="line"></span><br><span class="line">  <span class="comment">// platform</span></span><br><span class="line">  isReservedTag: <span class="function">(<span class="params">x?: <span class="built_in">string</span></span>) =&gt;</span> <span class="built_in">boolean</span>;</span><br><span class="line">  isReservedAttr: <span class="function">(<span class="params">x?: <span class="built_in">string</span></span>) =&gt;</span> <span class="built_in">boolean</span>;</span><br><span class="line">  parsePlatformTagName: <span class="function">(<span class="params">x: <span class="built_in">string</span></span>) =&gt;</span> <span class="built_in">string</span>;</span><br><span class="line">  isUnknownElement: <span class="function">(<span class="params">x?: <span class="built_in">string</span></span>) =&gt;</span> <span class="built_in">boolean</span>;</span><br><span class="line">  getTagNamespace: <span class="function">(<span class="params">x?: <span class="built_in">string</span></span>) =&gt;</span> <span class="built_in">string</span> | <span class="built_in">void</span>;</span><br><span class="line">  mustUseProp: <span class="function">(<span class="params">tag: <span class="built_in">string</span>, <span class="keyword">type</span>: ?<span class="built_in">string</span>, name: <span class="built_in">string</span></span>) =&gt;</span> <span class="built_in">boolean</span>;</span><br><span class="line"></span><br><span class="line">  <span class="comment">// legacy</span></span><br><span class="line">  _lifecycleHooks: <span class="built_in">Array</span>&lt;<span class="built_in">string</span>&gt;;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>紧接着，又为Vue挂载了一个util对象，对象内部包含四个方法：<code>warn</code>,<code>extend</code>,<code>mergeOptions</code>,<code>defineReactive</code>：<br><figure class="highlight autohotkey"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">Vue.util = &#123;</span><br><span class="line"><span class="built_in">  warn,</span></span><br><span class="line"><span class="built_in">  extend,</span></span><br><span class="line"><span class="built_in">  mergeOptions,</span></span><br><span class="line">  defineReactive</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>之后，挂载<code>set</code>,<code>delete</code>,<code>nextTick</code>,其中<code>delete</code>和<code>nextTick</code>在之前的stateMixin中已经被挂载过一次，不同的是之前是挂载到实例上，这次是作为一个静态方法挂载。<br><figure class="highlight stylus"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">Vue<span class="selector-class">.set</span> = set</span><br><span class="line">Vue<span class="selector-class">.delete</span> = del</span><br><span class="line">Vue<span class="selector-class">.nextTick</span> = nextTick</span><br></pre></td></tr></table></figure></p>
+<p>然后，又为Vue挂载了一个<code>options</code>静态属性，它的初始值是一个通过Object.create(null)创建的空对象。之后便通过遍历ASSET_TYPES将<code>components</code>,<code>directives</code>,<code>filters</code>作为options对象的key追加进去，最后又将当前的Vue构造函数以key为<code>_base</code>追加到options中，如下：<br><figure class="highlight vim"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">Vue.<span class="keyword">options</span> = &#123;</span><br><span class="line">  component<span class="variable">s:</span>&#123;&#125;,</span><br><span class="line">  directive<span class="variable">s:</span>&#123;&#125;,</span><br><span class="line">  <span class="built_in">filter</span><span class="variable">s:</span>&#123;&#125;,</span><br><span class="line">  _base:Vue</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>下面一行代码：<br><figure class="highlight stylus"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="title">extend</span><span class="params">(Vue.options.components, builtInComponents)</span></span></span><br></pre></td></tr></table></figure></p>
+<p>extend方法详见shared目录下，简单讲就是copy一个对象到另一个对象上，将两个对象进行合并。这里是将builtInComponents合并到Vue.options.components上，因为当前 builtInComponents 仅仅代表的是内置组件keep-live，所以合并完之后应该是下面的样子：<br><figure class="highlight vim"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">Vue.<span class="keyword">options</span> = &#123;</span><br><span class="line">  component<span class="variable">s:</span>&#123;</span><br><span class="line">    KeepAlive</span><br><span class="line">  &#125;,</span><br><span class="line">  directive<span class="variable">s:</span>&#123;&#125;,</span><br><span class="line">  <span class="built_in">filter</span><span class="variable">s:</span>&#123;&#125;,</span><br><span class="line">  _base:Vue</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>最后，执行了<code>initUse</code>,<code>initMixin</code>,<code>initExtend</code>,<code>initAssetRegisters</code>：</p>
+<h4 id="initUse"><a href="#initUse" class="headerlink" title="initUse"></a>initUse</h4><p>挂载全局的Vue.use静态方法，该方法用于安装 Vue.js 插件，官方文档地址：<a href="https://cn.vuejs.org/v2/api/#Vue-use" target="_blank" rel="noopener">点击进入</a>。</p>
+<h4 id="initMixin-1"><a href="#initMixin-1" class="headerlink" title="initMixin"></a>initMixin</h4><p>挂载全局的Vue.mixin静态方法，官方文档地址：<a href="https://cn.vuejs.org/v2/api/#mixins" target="_blank" rel="noopener">点击进入</a></p>
+<h4 id="initExtend"><a href="#initExtend" class="headerlink" title="initExtend"></a>initExtend</h4><p>挂载全局的Vue.extend静态方法，用于扩展组件选项，官方文档地址：<a href="https://cn.vuejs.org/v2/api/#extends" target="_blank" rel="noopener">点击进入</a></p>
+<h4 id="initAssetRegisters"><a href="#initAssetRegisters" class="headerlink" title="initAssetRegisters"></a>initAssetRegisters</h4><p>再次遍历ASSET_TYPES，挂载全局方法<code>component</code>,<code>directive</code>,<code>filter</code>：<br><figure class="highlight actionscript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">Vue.component = <span class="function"><span class="keyword">function</span><span class="params">()</span></span>&#123;&#125;</span><br><span class="line">Vue.directive = <span class="function"><span class="keyword">function</span><span class="params">()</span></span>&#123;&#125;</span><br><span class="line">Vue.filter = <span class="function"><span class="keyword">function</span><span class="params">()</span></span>&#123;&#125;</span><br></pre></td></tr></table></figure></p>
+
+            
+
+        </div>
+    </div>
+    <div id="post-footer" class="post-footer main-content-wrap">
+        
+            <div class="post-footer-tags">
+                <span class="text-color-light text-small">TAGGED IN</span><br/>
+                
+    <a class="tag tag--primary tag--small t-link" href="/tags/Vue/">Vue</a> <a class="tag tag--primary tag--small t-link" href="/tags/源码分析/">源码分析</a>
+
+            </div>
+        
+        
+            <div class="post-actions-wrap">
+    <nav>
+        <ul class="post-actions post-action-nav">
+            <li class="post-action">
+                
+                    <a class="post-action-btn btn btn--disabled">
+                
+                    <i class="fa fa-angle-left" aria-hidden="true"></i>
+                    <span class="hide-xs hide-sm text-small icon-ml">PREVIOUS</span>
+                </a>
+            </li>
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/" data-tooltip="HTML5的图片上传、预览与压缩功能的实现" aria-label="NEXT: HTML5的图片上传、预览与压缩功能的实现">
+                
+                    <span class="hide-xs hide-sm text-small icon-mr">NEXT</span>
+                    <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+    <ul class="post-actions post-action-share">
+        <li class="post-action hide-lg hide-md hide-sm">
+            <a class="post-action-btn btn btn--default btn-open-shareoptions" href="#btn-open-shareoptions" aria-label="Share this post">
+                <i class="fa fa-share-alt" aria-hidden="true"></i>
+            </a>
+        </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/" title="Share on Weibo">
+                    <i class="fa fa-weibo" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/&amp;title=Vue 2.5.9 源码分析（一） ~ 从构造函数开始" title="Share on QQ">
+                    <i class="fa fa-qq" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/" title="Share on Qzone">
+                    <i class="fa fa-star" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+        
+            
+                <li class="post-action">
+                    <a class="post-action-btn btn btn--default" href="#disqus_thread">
+                        <i class="fa fa-comment-o"></i>
+                    </a>
+                </li>
+            
+        
+        <li class="post-action">
+            
+                <a class="post-action-btn btn btn--default" href="#" aria-label="Back to top">
+            
+                <i class="fa fa-list" aria-hidden="true"></i>
+            </a>
+        </li>
+    </ul>
+</div>
+
+
+        
+        
+            
+                <div id="disqus_thread">
+    <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+</div>
+            
+        
+    </div>
+</article>
+
+
+
+                <footer id="footer" class="main-content-wrap">
+    <span class="copyrights">
+        Copyrights &copy; 2018 Mengyu&#39;s Notes. All Rights Reserved.
+    </span>
+</footer>
+
+            </div>
+            
+                <div id="bottom-bar" class="post-bottom-bar" data-behavior="5">
+                    <div class="post-actions-wrap">
+    <nav>
+        <ul class="post-actions post-action-nav">
+            <li class="post-action">
+                
+                    <a class="post-action-btn btn btn--disabled">
+                
+                    <i class="fa fa-angle-left" aria-hidden="true"></i>
+                    <span class="hide-xs hide-sm text-small icon-ml">PREVIOUS</span>
+                </a>
+            </li>
+            <li class="post-action">
+                
+                    
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2018/01/14/HTML5的图片上传、预览与压缩功能的实现/" data-tooltip="HTML5的图片上传、预览与压缩功能的实现" aria-label="NEXT: HTML5的图片上传、预览与压缩功能的实现">
+                
+                    <span class="hide-xs hide-sm text-small icon-mr">NEXT</span>
+                    <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+    <ul class="post-actions post-action-share">
+        <li class="post-action hide-lg hide-md hide-sm">
+            <a class="post-action-btn btn btn--default btn-open-shareoptions" href="#btn-open-shareoptions" aria-label="Share this post">
+                <i class="fa fa-share-alt" aria-hidden="true"></i>
+            </a>
+        </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/" title="Share on Weibo">
+                    <i class="fa fa-weibo" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/&amp;title=Vue 2.5.9 源码分析（一） ~ 从构造函数开始" title="Share on QQ">
+                    <i class="fa fa-qq" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+            
+            
+            <li class="post-action hide-xs">
+                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/" title="Share on Qzone">
+                    <i class="fa fa-star" aria-hidden="true"></i>
+                </a>
+            </li>
+        
+        
+            
+                <li class="post-action">
+                    <a class="post-action-btn btn btn--default" href="#disqus_thread">
+                        <i class="fa fa-comment-o"></i>
+                    </a>
+                </li>
+            
+        
+        <li class="post-action">
+            
+                <a class="post-action-btn btn btn--default" href="#" aria-label="Back to top">
+            
+                <i class="fa fa-list" aria-hidden="true"></i>
+            </a>
+        </li>
+    </ul>
+</div>
+
+
+                </div>
+                <div id="share-options-bar" class="share-options-bar" data-behavior="5">
+    <i id="btn-close-shareoptions" class="fa fa-close"></i>
+    <ul class="share-options">
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/">
+                    <i class="fa fa-weibo" aria-hidden="true"></i><span>Share on Weibo</span>
+                </a>
+            </li>
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/&amp;title=Vue 2.5.9 源码分析（一） ~ 从构造函数开始">
+                    <i class="fa fa-qq" aria-hidden="true"></i><span>Share on QQ</span>
+                </a>
+            </li>
+        
+            
+            
+            <li class="share-option">
+                <a class="share-option-btn" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/">
+                    <i class="fa fa-star" aria-hidden="true"></i><span>Share on Qzone</span>
+                </a>
+            </li>
+        
+    </ul>
+</div>
+
+            
+        </div>
+        
+
+
+    
+        
+    
+
+<div id="about">
+    <div id="about-card">
+        <div id="about-btn-close">
+            <i class="fa fa-remove"></i>
+        </div>
+        
+            <img id="about-card-picture" src="/assets/images/pic.jpg" alt="Author&#39;s picture"/>
+        
+            <h4 id="about-card-name">Mengyu&#39;s Notes</h4>
+        
+            <div id="about-card-bio"><p>一身情怀，两手空空</p>
+</div>
+        
+        
+            <div id="about-card-job">
+                <i class="fa fa-briefcase"></i>
+                <br/>
+                <p>FE</p>
+
+            </div>
+        
+        
+            <div id="about-card-location">
+                <i class="fa fa-map-marker"></i>
+                <br/>
+                Beijing
+            </div>
+        
+    </div>
+</div>
+
+        
+        
+<div id="cover" style="background-image:url('/assets/images/cover-v1.2.0.jpg');"></div>
+        <!--SCRIPTS-->
+<script src="/assets/js/script-yhuo2grt8r7qkqumzgjoglkfbicl1thukjgmla6jopu56zpcowfedi5zjcor.min.js"></script>
+<!--SCRIPTS END-->
+
+    
+        <script>
+             var disqus_config = function () {
+                 this.page.url = 'http://mife.io/2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/';
+                 
+                    this.page.identifier = '2018/06/12/Vue-2-5-9-源码分析之从构造函数开始/';
+                 
+             };
+            (function() {
+                var d = document, s = d.createElement('script');
+                var disqus_shortname = 'mife';
+                s.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+
+                s.setAttribute('data-timestamp', +new Date());
+                (d.head || d.body).appendChild(s);
+            })();
+        </script>
+    
+
+
+
+    </body>
+</html>
