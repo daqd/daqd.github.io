@@ -6,26 +6,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="generator" content="Mengyu&#39;s Notes">
-    <title>Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略 - Mengyu&#39;s Notes</title>
+    <title>电影《一出好戏》观感 - Mengyu&#39;s Notes</title>
     <meta name="author" content="Mengyu&#39;s Notes">
     
     
         <link rel="icon" href="http://mife.io/assets/images/favicon.ico">
     
     
-    <script type="application/ld+json">{"@context":"http://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg"},"articleBody":"上一篇，在Vue的合并选项过程中，对props,inject,directives进行了统一的规范化处理，不管框架的使用者在传入初始化选项的时候传入了何种格式，在框架的内部都会转换成统一的数据格式，在提升了框架使用上的灵活性的同时，又保证了框架在内部对数据更加严谨的处理。在之前的分析过程中，我们也遇到了些许疑问，并加上了相应的问题备注，不过，这些暂时不会影响我们继续阅读源码，随着对整体框架的深入的了解，再回看这些问题，这些问题也就不再是问题。\n实际上，本文和上一篇算是一部分，选项合并主要包含了两部分：一部分是对数据的规范化，另一部分就是对不同选项的策略的挂载。这篇，我们紧接着上一篇，对选项的策略挂载进行分析。\n","dateCreated":"2018-08-10T17:00:22+08:00","dateModified":"2018-08-10T17:19:52+08:00","datePublished":"2018-08-10T17:00:22+08:00","description":"上一篇，在Vue的合并选项过程中，对props,inject,directives进行了统一的规范化处理，不管框架的使用者在传入初始化选项的时候传入了何种格式，在框架的内部都会转换成统一的数据格式，在提升了框架使用上的灵活性的同时，又保证了框架在内部对数据更加严谨的处理。在之前的分析过程中，我们也遇到了些许疑问，并加上了相应的问题备注，不过，这些暂时不会影响我们继续阅读源码，随着对整体框架的深入的了解，再回看这些问题，这些问题也就不再是问题。\n实际上，本文和上一篇算是一部分，选项合并主要包含了两部分：一部分是对数据的规范化，另一部分就是对不同选项的策略的挂载。这篇，我们紧接着上一篇，对选项的策略挂载进行分析。","headline":"Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略","image":[],"mainEntityOfPage":{"@type":"WebPage","@id":"http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/"},"publisher":{"@type":"Organization","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg","logo":{"@type":"ImageObject","url":"pic.jpg"}},"url":"http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/","keywords":"源码分析, Vue"}</script>
-    <meta name="description" content="上一篇，在Vue的合并选项过程中，对props,inject,directives进行了统一的规范化处理，不管框架的使用者在传入初始化选项的时候传入了何种格式，在框架的内部都会转换成统一的数据格式，在提升了框架使用上的灵活性的同时，又保证了框架在内部对数据更加严谨的处理。在之前的分析过程中，我们也遇到了些许疑问，并加上了相应的问题备注，不过，这些暂时不会影响我们继续阅读源码，随着对整体框架的深入的">
-<meta name="keywords" content="源码分析,Vue">
+    <script type="application/ld+json">{"@context":"http://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg"},"articleBody":"1.人性，人最根本的需求还是生存，在生存得到满足之后，才会在物质和精神上有更高的追求。所以，如果在生活中解决了温饱之后，还是觉得生活很累，其实就是想要的太多，大多数都是自己带给自己的，努力工作不一定成功，相反，不努力工作想必一定很轻松。【手动滑稽脸】不过，大多数人还是选择在负重前行，比如说我，所以用不着不顺心的时候怨天尤人，问题的本质应该在这里，在自身，每个人都有自己的活法，同样具有其选择的权利。\n2.之所以一群人在被困在荒岛之后，中间几个人发现了外部世界的船只，并将这些信息告诉其他人之后，却不被相信，那些不相信的人可能永远也不会亲自到山顶去验证一下自己的想法，因为在他们自我的思维意识里，一直以为那里有个野兽。从另一个角度来想，这不正是人的一个思维的局限性嘛，不管是在生活还是工作中，在考虑一些问题的时候不会轻易尝试着去触碰个人思维的边界，固步自封在自以为的相对安全的思维空间，你以为的可能只是你以为的而已，有时候大胆一点真的会有不一样的效果，会意外收获更好的结果或者更多的机会。\n3.在这一季的极限挑战最后一期播完，因为也是黄渤导的，确实一般，也导致于瞬间对这个电影无感了，今天在去之前看了豆瓣7.6的评分，本想着剩下的心理分靠情怀来补上吧，毕竟老男人的我还是要支持下这帮老男人们的，不过，张艺兴的表演的确很出彩，算是个惊喜，基本上无尬点。\n4.很多人看了还会有经济,职场等等相关的思考，可能吃鸡的职业选手看完，整个观影都是在跑毒吧，毕竟从最根本上来说这是一个荒岛求生的电影情景。不过，对于看电影来说，除了更多的嘻嘻哈哈之外，能从自身出发得到一些有价值的思考，这应该才是去看电影的初衷吧。\n最后，北京今天下雨，看了场电影丢了一把伞，似乎很应景。最近几个月，在我身上发生了很多匪夷所思的事情，有大有小，整个联系起来的话，心态有点崩，好在我一直都在自我暗示，感觉我的生活马上将会出现一个爆点。\n（完 | 晚安）\n","dateCreated":"2018-08-11T23:55:10+08:00","dateModified":"2018-08-11T23:58:33+08:00","datePublished":"2018-08-11T23:55:10+08:00","description":"1.人性，人最根本的需求还是生存，在生存得到满足之后，才会在物质和精神上有更高的追求。所以，如果在生活中解决了温饱之后，还是觉得生活很累，其实就是想要的太多，大多数都是自己带给自己的，努力工作不一定成功，相反，不努力工作想必一定很轻松。【手动滑稽脸】不过，大多数人还是选择在负重前行，比如说我，所以用不着不顺心的时候怨天尤人，问题的本质应该在这里，在自身，每个人都有自己的活法，同样具有其选择的权利。","headline":"电影《一出好戏》观感","image":[],"mainEntityOfPage":{"@type":"WebPage","@id":"http://mife.io/2018/08/11/电影《一出好戏》观感/"},"publisher":{"@type":"Organization","name":"Mengyu's Notes","sameAs":["https://github.com/daqd","mailto:hellojser@gmail.com"],"image":"pic.jpg","logo":{"@type":"ImageObject","url":"pic.jpg"}},"url":"http://mife.io/2018/08/11/电影《一出好戏》观感/","keywords":"影评"}</script>
+    <meta name="description" content="1.人性，人最根本的需求还是生存，在生存得到满足之后，才会在物质和精神上有更高的追求。所以，如果在生活中解决了温饱之后，还是觉得生活很累，其实就是想要的太多，大多数都是自己带给自己的，努力工作不一定成功，相反，不努力工作想必一定很轻松。【手动滑稽脸】不过，大多数人还是选择在负重前行，比如说我，所以用不着不顺心的时候怨天尤人，问题的本质应该在这里，在自身，每个人都有自己的活法，同样具有其选择的权利。">
+<meta name="keywords" content="影评">
 <meta property="og:type" content="blog">
-<meta property="og:title" content="Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略">
-<meta property="og:url" content="http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/index.html">
+<meta property="og:title" content="电影《一出好戏》观感">
+<meta property="og:url" content="http://mife.io/2018/08/11/电影《一出好戏》观感/index.html">
 <meta property="og:site_name" content="Mengyu&#39;s Notes">
-<meta property="og:description" content="上一篇，在Vue的合并选项过程中，对props,inject,directives进行了统一的规范化处理，不管框架的使用者在传入初始化选项的时候传入了何种格式，在框架的内部都会转换成统一的数据格式，在提升了框架使用上的灵活性的同时，又保证了框架在内部对数据更加严谨的处理。在之前的分析过程中，我们也遇到了些许疑问，并加上了相应的问题备注，不过，这些暂时不会影响我们继续阅读源码，随着对整体框架的深入的">
+<meta property="og:description" content="1.人性，人最根本的需求还是生存，在生存得到满足之后，才会在物质和精神上有更高的追求。所以，如果在生活中解决了温饱之后，还是觉得生活很累，其实就是想要的太多，大多数都是自己带给自己的，努力工作不一定成功，相反，不努力工作想必一定很轻松。【手动滑稽脸】不过，大多数人还是选择在负重前行，比如说我，所以用不着不顺心的时候怨天尤人，问题的本质应该在这里，在自身，每个人都有自己的活法，同样具有其选择的权利。">
 <meta property="og:locale" content="zh-Hans">
-<meta property="og:updated_time" content="2018-08-10T09:19:52.798Z">
+<meta property="og:updated_time" content="2018-08-11T15:58:33.372Z">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略">
-<meta name="twitter:description" content="上一篇，在Vue的合并选项过程中，对props,inject,directives进行了统一的规范化处理，不管框架的使用者在传入初始化选项的时候传入了何种格式，在框架的内部都会转换成统一的数据格式，在提升了框架使用上的灵活性的同时，又保证了框架在内部对数据更加严谨的处理。在之前的分析过程中，我们也遇到了些许疑问，并加上了相应的问题备注，不过，这些暂时不会影响我们继续阅读源码，随着对整体框架的深入的">
+<meta name="twitter:title" content="电影《一出好戏》观感">
+<meta name="twitter:description" content="1.人性，人最根本的需求还是生存，在生存得到满足之后，才会在物质和精神上有更高的追求。所以，如果在生活中解决了温饱之后，还是觉得生活很累，其实就是想要的太多，大多数都是自己带给自己的，努力工作不一定成功，相反，不努力工作想必一定很轻松。【手动滑稽脸】不过，大多数人还是选择在负重前行，比如说我，所以用不着不顺心的时候怨天尤人，问题的本质应该在这里，在自身，每个人都有自己的活法，同样具有其选择的权利。">
     
     
         
@@ -210,14 +210,14 @@
         <div class="post-header main-content-wrap text-left">
     
         <h1 class="post-title">
-            Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略
+            电影《一出好戏》观感
         </h1>
     
     
         <div class="post-meta">
-    <time datetime="2018-08-10T17:00:22+08:00">
+    <time datetime="2018-08-11T23:55:10+08:00">
 	
-		    Aug 10, 2018
+		    Aug 11, 2018
     	
     </time>
     
@@ -229,8 +229,12 @@
     
     <div class="post-content markdown">
         <div class="main-content-wrap">
-            <p>上一篇，在Vue的合并选项过程中，对<code>props</code>,<code>inject</code>,<code>directives</code>进行了统一的规范化处理，不管框架的使用者在传入初始化选项的时候传入了何种格式，在框架的内部都会转换成统一的数据格式，在提升了框架使用上的灵活性的同时，又保证了框架在内部对数据更加严谨的处理。在之前的分析过程中，我们也遇到了些许疑问，并加上了相应的问题备注，不过，这些暂时不会影响我们继续阅读源码，随着对整体框架的深入的了解，再回看这些问题，这些问题也就不再是问题。</p>
-<p>实际上，本文和上一篇算是一部分，选项合并主要包含了两部分：一部分是对数据的规范化，另一部分就是对不同选项的策略的挂载。这篇，我们紧接着上一篇，对选项的策略挂载进行分析。<br><a id="more"></a></p>
+            <p>1.人性，人最根本的需求还是生存，在生存得到满足之后，才会在物质和精神上有更高的追求。所以，如果在生活中解决了温饱之后，还是觉得生活很累，其实就是想要的太多，大多数都是自己带给自己的，努力工作不一定成功，相反，不努力工作想必一定很轻松。【手动滑稽脸】不过，大多数人还是选择在负重前行，比如说我，所以用不着不顺心的时候怨天尤人，问题的本质应该在这里，在自身，每个人都有自己的活法，同样具有其选择的权利。<br><a id="more"></a></p>
+<p>2.之所以一群人在被困在荒岛之后，中间几个人发现了外部世界的船只，并将这些信息告诉其他人之后，却不被相信，那些不相信的人可能永远也不会亲自到山顶去验证一下自己的想法，因为在他们自我的思维意识里，一直以为那里有个野兽。从另一个角度来想，这不正是人的一个思维的局限性嘛，不管是在生活还是工作中，在考虑一些问题的时候不会轻易尝试着去触碰个人思维的边界，固步自封在自以为的相对安全的思维空间，你以为的可能只是你以为的而已，有时候大胆一点真的会有不一样的效果，会意外收获更好的结果或者更多的机会。</p>
+<p>3.在这一季的极限挑战最后一期播完，因为也是黄渤导的，确实一般，也导致于瞬间对这个电影无感了，今天在去之前看了豆瓣7.6的评分，本想着剩下的心理分靠情怀来补上吧，毕竟老男人的我还是要支持下这帮老男人们的，不过，张艺兴的表演的确很出彩，算是个惊喜，基本上无尬点。</p>
+<p>4.很多人看了还会有经济,职场等等相关的思考，可能吃鸡的职业选手看完，整个观影都是在跑毒吧，毕竟从最根本上来说这是一个荒岛求生的电影情景。不过，对于看电影来说，除了更多的嘻嘻哈哈之外，能从自身出发得到一些有价值的思考，这应该才是去看电影的初衷吧。</p>
+<p>最后，北京今天下雨，看了场电影丢了一把伞，似乎很应景。最近几个月，在我身上发生了很多匪夷所思的事情，有大有小，整个联系起来的话，心态有点崩，好在我一直都在自我暗示，感觉我的生活马上将会出现一个爆点。</p>
+<p>（完 | 晚安）</p>
 
             
 
@@ -241,7 +245,7 @@
             <div class="post-footer-tags">
                 <span class="text-color-light text-small">TAGGED IN</span><br/>
                 
-    <a class="tag tag--primary tag--small t-link" href="/tags/Vue/">Vue</a> <a class="tag tag--primary tag--small t-link" href="/tags/源码分析/">源码分析</a>
+    <a class="tag tag--primary tag--small t-link" href="/tags/影评/">影评</a>
 
             </div>
         
@@ -251,8 +255,7 @@
         <ul class="post-actions post-action-nav">
             <li class="post-action">
                 
-                    
-                    <a class="post-action-btn btn btn--default tooltip--top" href="/2018/08/11/电影《一出好戏》观感/" data-tooltip="电影《一出好戏》观感" aria-label="PREVIOUS: 电影《一出好戏》观感">
+                    <a class="post-action-btn btn btn--disabled">
                 
                     <i class="fa fa-angle-left" aria-hidden="true"></i>
                     <span class="hide-xs hide-sm text-small icon-ml">PREVIOUS</span>
@@ -261,7 +264,7 @@
             <li class="post-action">
                 
                     
-                    <a class="post-action-btn btn btn--default tooltip--top" href="/2018/08/08/Vue-2-5-9-源码分析（二）-Vue初始化之选项的合并及统一规范化处理/" data-tooltip="Vue 2.5.9 源码分析（二） ~ Vue初始化之选项的合并及统一规范化处理" aria-label="NEXT: Vue 2.5.9 源码分析（二） ~ Vue初始化之选项的合并及统一规范化处理">
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/" data-tooltip="Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略" aria-label="NEXT: Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略">
                 
                     <span class="hide-xs hide-sm text-small icon-mr">NEXT</span>
                     <i class="fa fa-angle-right" aria-hidden="true"></i>
@@ -279,7 +282,7 @@
             
             
             <li class="post-action hide-xs">
-                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/" title="Share on Weibo">
+                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/08/11/电影《一出好戏》观感/" title="Share on Weibo">
                     <i class="fa fa-weibo" aria-hidden="true"></i>
                 </a>
             </li>
@@ -287,7 +290,7 @@
             
             
             <li class="post-action hide-xs">
-                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/&amp;title=Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略" title="Share on QQ">
+                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/08/11/电影《一出好戏》观感/&amp;title=电影《一出好戏》观感" title="Share on QQ">
                     <i class="fa fa-qq" aria-hidden="true"></i>
                 </a>
             </li>
@@ -295,7 +298,7 @@
             
             
             <li class="post-action hide-xs">
-                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/" title="Share on Qzone">
+                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/08/11/电影《一出好戏》观感/" title="Share on Qzone">
                     <i class="fa fa-star" aria-hidden="true"></i>
                 </a>
             </li>
@@ -347,8 +350,7 @@
         <ul class="post-actions post-action-nav">
             <li class="post-action">
                 
-                    
-                    <a class="post-action-btn btn btn--default tooltip--top" href="/2018/08/11/电影《一出好戏》观感/" data-tooltip="电影《一出好戏》观感" aria-label="PREVIOUS: 电影《一出好戏》观感">
+                    <a class="post-action-btn btn btn--disabled">
                 
                     <i class="fa fa-angle-left" aria-hidden="true"></i>
                     <span class="hide-xs hide-sm text-small icon-ml">PREVIOUS</span>
@@ -357,7 +359,7 @@
             <li class="post-action">
                 
                     
-                    <a class="post-action-btn btn btn--default tooltip--top" href="/2018/08/08/Vue-2-5-9-源码分析（二）-Vue初始化之选项的合并及统一规范化处理/" data-tooltip="Vue 2.5.9 源码分析（二） ~ Vue初始化之选项的合并及统一规范化处理" aria-label="NEXT: Vue 2.5.9 源码分析（二） ~ Vue初始化之选项的合并及统一规范化处理">
+                    <a class="post-action-btn btn btn--default tooltip--top" href="/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/" data-tooltip="Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略" aria-label="NEXT: Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略">
                 
                     <span class="hide-xs hide-sm text-small icon-mr">NEXT</span>
                     <i class="fa fa-angle-right" aria-hidden="true"></i>
@@ -375,7 +377,7 @@
             
             
             <li class="post-action hide-xs">
-                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/" title="Share on Weibo">
+                <a class="post-action-btn btn btn--default" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/08/11/电影《一出好戏》观感/" title="Share on Weibo">
                     <i class="fa fa-weibo" aria-hidden="true"></i>
                 </a>
             </li>
@@ -383,7 +385,7 @@
             
             
             <li class="post-action hide-xs">
-                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/&amp;title=Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略" title="Share on QQ">
+                <a class="post-action-btn btn btn--default" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/08/11/电影《一出好戏》观感/&amp;title=电影《一出好戏》观感" title="Share on QQ">
                     <i class="fa fa-qq" aria-hidden="true"></i>
                 </a>
             </li>
@@ -391,7 +393,7 @@
             
             
             <li class="post-action hide-xs">
-                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/" title="Share on Qzone">
+                <a class="post-action-btn btn btn--default" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/08/11/电影《一出好戏》观感/" title="Share on Qzone">
                     <i class="fa fa-star" aria-hidden="true"></i>
                 </a>
             </li>
@@ -424,7 +426,7 @@
             
             
             <li class="share-option">
-                <a class="share-option-btn" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/">
+                <a class="share-option-btn" target="new" href="http://service.weibo.com/share/share.php?&amp;title=http://mife.io/2018/08/11/电影《一出好戏》观感/">
                     <i class="fa fa-weibo" aria-hidden="true"></i><span>Share on Weibo</span>
                 </a>
             </li>
@@ -432,7 +434,7 @@
             
             
             <li class="share-option">
-                <a class="share-option-btn" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/&amp;title=Vue 2.5.9 源码分析（三） ~ Vue初始化之选项的合并策略">
+                <a class="share-option-btn" target="new" href="http://connect.qq.com/widget/shareqq/index.html?url=http://mife.io/2018/08/11/电影《一出好戏》观感/&amp;title=电影《一出好戏》观感">
                     <i class="fa fa-qq" aria-hidden="true"></i><span>Share on QQ</span>
                 </a>
             </li>
@@ -440,7 +442,7 @@
             
             
             <li class="share-option">
-                <a class="share-option-btn" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/">
+                <a class="share-option-btn" target="new" href="http://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=http://mife.io/2018/08/11/电影《一出好戏》观感/">
                     <i class="fa fa-star" aria-hidden="true"></i><span>Share on Qzone</span>
                 </a>
             </li>
@@ -498,9 +500,9 @@
     
         <script>
              var disqus_config = function () {
-                 this.page.url = 'http://mife.io/2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/';
+                 this.page.url = 'http://mife.io/2018/08/11/电影《一出好戏》观感/';
                  
-                    this.page.identifier = '2018/08/10/Vue-2-5-9-源码分析（三）-Vue初始化之选项的合并策略/';
+                    this.page.identifier = '2018/08/11/电影《一出好戏》观感/';
                  
              };
             (function() {
